@@ -26,8 +26,13 @@ def serialConfig(configFileName): #Open the serial ports and configure the senso
 
 #Establish connection, sensor configuration and printing datas
 serconf, serdat = serialConfig(configFileName)
-while True :
+i=0
+while i<5 :
     byteCount = serdat.inWaiting()         #get the count of bytes in buffer
     s = serdat.read(byteCount)             #read byteCount bytes from the buffer
     if s :
         print(s)
+        i+=1
+serconf.write(("sensorStop").encode())  #stopping sensor before closing ports
+serconf.close()                         #closing ports
+serdat.close()
