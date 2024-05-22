@@ -1,0 +1,46 @@
+                                   OVERVIEW                                    
+Memory                              Used               Total        Percent Used
+--------------------------------------------------------------------------------
+PAGE 0:
+DATA_RAM                           63900              196608              32.50%
+HS_RAM                                 0               32768               0.00%
+HWA_RAM                                0               65536               0.00%
+L3_RAM                            786432              786432             100.00%
+PROG_RAM                          143958              524032              27.47%
+VECTORS                               60                 256              23.44%
+PAGE 1:
+L3_RAM                                 0              786432               0.00%
+
+
+                            Type           DATA_RAM       HS_RAM      HWA_RAM       L3_RAM     PROG_RAM      VECTORS
+--------------------------------------------------------------------------------
+(.common:gMmwDemoFlash)     data                 12            0            0            0            0            0
+APP                         code                  0            0            0            0        30486           60
+APP                         data              17208            0            0            0         2347            0
+APP                         dpclocalram         4096            0            0            0            0            0
+APP                         heap              34816            0            0       786432            0            0
+BIOS                        code                  0            0            0            0        22479            0
+BIOS                        data                  4            0            0            0            0            0
+COMPONENTS_CORE             code                  0            0            0            0         3497            0
+COMPONENTS_CORE             data                 36            0            0            0            0            0
+C_RUNTIME                   code                  0            0            0            0        17176            0
+C_RUNTIME                   data                784            0            0            0          769            0
+DPC                         data                  4            0            0            0            0            0
+DPM                         code                  0            0            0            0         3158            0
+DPM                         data                 32            0            0            0           40            0
+DPU                         code                  0            0            0            0         6170            0
+DRIVERS_CORE                code                  0            0            0            0        17808            0
+DRIVERS_CORE                data               1712            0            0            0          256            0
+DRIVERS_OPTIONAL            code                  0            0            0            0        17886            0
+DRIVERS_OPTIONAL            data               1844            0            0            0          256            0
+MMWAVE                      code                  0            0            0            0         8080            0
+MMWAVE                      data                264            0            0            0            0            0
+MMWAVELINK                  code                  0            0            0            0         7678            0
+MMWAVELINK                  data               1000            0            0            0          832            0
+libqspi_xwr68xx.aer4f       code                  0            0            0            0          779            0
+libqspi_xwr68xx.aer4f       data                 20            0            0            0           16            0
+libqspiflash_xwr68xx.aer4f  code                  0            0            0            0         2168            0
+libqspiflash_xwr68xx.aer4f  data                 20            0            0            0            0            0
+linker-generated            linker             2048            0            0            0          343            0
+linker-generated            unknown               0            0            0            0         1422            0
+mmwdemo_flash.oer4f         code                  0            0            0            0          312            0
