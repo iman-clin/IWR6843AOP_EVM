@@ -1,5 +1,23 @@
 import serial
 import time
+import numpy as np
+
+#import ti's frame parser function
+from parser_mmw_demo import parser_one_mmw_demo_output_packet, parser_helper
+
+#debug var to print operations
+DEBUG = True
+
+#initialize byte buffer and others useful vars
+MAXBUFFERSIZE = 2**15
+byteBuffer = np.zeros(MAXBUFFERSIZE,dtype = 'uint8')
+byteBufferLength = 0
+magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
+byteword = []
+wordread = 0
+byteCount = 0
+magicWordFound = False
+nextMagicWordFound = False
 
 Dataport = input("mmWave Demo output data port (standard port) = ")     #ask user for data port
 Configport = input("mmWave Demo input config port (enhanced port) = ")  #ask user for config port
@@ -10,13 +28,14 @@ def serialConfig(configFileName): #Open the serial ports and configure the senso
     # Open the serial ports
     # Windows
     serdat = serial.Serial(Dataport, 921600)            #establishing data connection
-    print("Data serial : ", serdat)
     serconf = serial.Serial(Configport, 115200)         #establishing config connection
-    print("Config serial : ", serconf)
+    if DEBUG :
+        print("Data serial : ", serdat)
+        print("Config serial : ", serconf)
 
     serconf.write(("configDataPort 921600 1").encode()) #Dataport configuration
 
-    # Read the configuration file and send it to the board
+    #Read the configuration file and send it to the board
     config = [line.rstrip('\r\n') for line in open(configFileName)]
     for i in config:
         serconf.write((i+'\n').encode())
@@ -75,17 +94,69 @@ def parseConfigFile(configFileName):
     return configParameters
    
 
-#Establish connection, sensor configuration and printing datas
+
+#Establish connection, sensor configuration and processing datas
 serconf, serdat = serialConfig(configFileName)
 configParameters = parseConfigFile(configFileName)
-print ("configParameters = ",configParameters)
-i=0
-while i<5 :
-    byteCount = serdat.inWaiting()         #get the count of bytes in buffer
-    s = serdat.read(byteCount)             #read byteCount bytes from the buffer
-    if s :
-        print(s)
-        i+=1
+if DEBUG :
+    print ("configParameters = ",configParameters)
+
+
+#Loop to process frames using parser_one_mmw_demo_output_packet
+for i in range (4) : #Number of processed frames, HARD-CODED !!!!!!!
+    while not(nextMagicWordFound):                          #while two separated magic word (= 1 complete frame) have not been found
+        wordread = serdat.read(serdat.inWaiting())          #get the read data in read buffer
+        byteword = np.frombuffer(wordread, dtype = 'uint8')      #convert read data into uint8 which can be processed
+        byteCount = len(byteword)                                #number of bytes in byte buf
+        
+        if (DEBUG and (len(byteword)!=0)) :
+            print(byteword)
+
+        # Check if limite size of buffer has been reached
+        if (byteBufferLength + byteCount) < MAXBUFFERSIZE:
+            byteBuffer[byteBufferLength:byteBufferLength + byteCount] = byteword[:byteCount]
+            byteBufferLength = byteBufferLength + byteCount
+        else :
+            print('Error : Reached max buffer size')
+            break
+        # Check for all possible locations of the magic word
+        possibleLocs = np.where(byteBuffer == magicWord[0])[0]   
+        # Confirm that is the beginning of the magic word and store the index in startIdx
+        startIdx = []
+        for loc in possibleLocs:
+            check = byteBuffer[loc:loc+8] # Gather the 8 following bytes of the possible location 
+            if np.all(check == magicWord):# Check if it corresponds to magic word
+                startIdx.append(loc)      # Append startIdx array with magic word locs
+        if len(startIdx) == 1 :
+            magicWordFound = True
+        if len(startIdx) > 1 :
+            nextMagicWordFound = True
+    print(startIdx)
+    #parse first frame found in buffer and recover utile datas
+    (result, headerStartIndex, totalPacketNumBytes, numDetObj, numTlv, subFrameNumber, detectedX_array, detectedY_array, detectedZ_array, detectedV_array, detectedRange_array, detectedAzimuth_array, detectedElevAngle_array, detectedSNR_array, detectedNoise_array) = parser_one_mmw_demo_output_packet(byteBuffer,byteBufferLength,DEBUG)
+
+    #delete already processed data from buffer
+    tempByteBuffer = byteBuffer[headerStartIndex+totalPacketNumBytes:]  #recover remaining unprocessed datas in temp buffer
+    byteBuffer = np.zeros(MAXBUFFERSIZE, dtype = 'uint8')               #reset main buffer
+    byteBuffer = tempByteBuffer                                         #paste remaining unprocessed datas in main buffer
+    byteBufferLength = len(byteBuffer)
+    print('Frame processed, new buffer length = ', byteBufferLength)
+
+    #reset loop condition (first magic word already found obviously, trouver un moyen de ne pas avoir a le check de nouveau)
+    magicWordFound = False
+    nextMagicWordFound = False
+    startIdx = []
+# !!!!!!!!!!!!!!!!!!!!!!!!!!! LOOP HERE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+#i=0
+#while i<5 :
+#    byteCount = serdat.inWaiting()         #get the count of bytes in buffer
+#    s = serdat.read(byteCount)             #read byteCount bytes from the buffer
+#    if (s and DEBUG):                                 #printing datas gathered
+#        print(s)
+#        i+=1
+
+
 serconf.write(("sensorStop").encode())  #stopping sensor before closing ports
 serconf.close()                         #closing ports
 serdat.close()
