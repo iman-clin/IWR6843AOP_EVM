@@ -275,7 +275,9 @@ def parser_one_mmw_demo_output_packet(data, readNumBytes,debug=False):
                 print("The 2nd TLV") 
                 print("    type %d" % (tlvType))
                 print("    len %d bytes" % (tlvLen))
-                                                            
+
+
+            # HERE TO RECOVER OTHERS TLV TYPES, needed type 4-Azimuth static hm & 8-Azimuth elevation hm (if 3d)
             if tlvType == 7: 
                 
                 # TLV type 7 contains snr and noise of all detect objects.
@@ -299,6 +301,7 @@ def parser_one_mmw_demo_output_packet(data, readNumBytes,debug=False):
             # end of if tlvType == 7
             if(debug):           
                 print("                  x(m)         y(m)         z(m)        v(m/s)    Com0range(m)  azimuth(deg)  elevAngle(deg)  snr(0.1dB)    noise(0.1dB)")
+                print(numDetObj)
                 for obj in range(numDetObj):
                     print("    obj%3d: %12f %12f %12f %12f %12f %12f %12d %12d %12d" % (obj, detectedX_array[obj], detectedY_array[obj], detectedZ_array[obj], detectedV_array[obj], detectedRange_array[obj], detectedAzimuth_array[obj], detectedElevAngle_array[obj], detectedSNR_array[obj], detectedNoise_array[obj]))
                 
