@@ -8,11 +8,11 @@ import numpy as np
 from parser_mmw_demo import parser_one_mmw_demo_output_packet
 
 # Configuration file name
-configFileName = os.getcwd() + '/config_file_64x64.cfg'
+configFileName = os.getcwd() + '/config_file_gics.cfg'
 
 # Number of rows and columns for TLV type 5
 NUMBER_OF_ROWS = 63
-NUMBER_OF_COLUMNS = 64
+NUMBER_OF_COLUMNS = 128
 
 # Buffer and useful variables
 CLIport = {}
@@ -228,6 +228,8 @@ def RangeDopplerHM(byteBuffer):
         if DEBUG:
             print('\n tlv length :', tlv_length)
 
+        #if tlv_type == 1:                      # Add later, to gather information on detected points
+
         # Read the data if TLV type 5 detected
         if tlv_type == 5:
             if DEBUG:
@@ -241,8 +243,8 @@ def RangeDopplerHM(byteBuffer):
                     print("\nRange Bins: ", NUMBER_OF_COLUMNS)
                     print("\nDoppler Bins: ", NUMBER_OF_ROWS + 1)
                 
-                ares = byteBuffer[idX:idX + resultSize].view(np.uint16)
-                res = np.reshape(ares, res.shape)
+                ares = byteBuffer[idX:idX + resultSize].view(np.uint16) # Data vector
+                res = np.reshape(ares, res.shape)                       # Data array of the right size
                 # Shift the data to the correct position
                 rest = np.fft.fftshift(res, axes=(1,))      # put left to center, put center to right
                 # Transpose the input data for better visualization
@@ -260,7 +262,6 @@ def RangeDopplerHM(byteBuffer):
                 break
             else:   # If the TLV is of other type than 5
                 idX += tlv_length
-    # If there are no TLV type 5 in the packet
     return dataOK, mat
 
 # ------------------------------------------------------------------
@@ -309,7 +310,7 @@ num = int(input("Number of samples: "))
 
 # Configure the serial ports
 CLIport, Dataport = serialConfig(configFileName)
-
+ 
 # Get the configuration parameters from the configuration file
 configParameters = parseConfigFile(configFileName)
 
@@ -322,9 +323,10 @@ def main():
     pos = 0
     while True:
         try:
-            time.sleep(1.5)                                     # Sampling frequency should be 2 Hz, !!! For some reason, unexploitable heatmaps above 0.6 Hz !!!
             # Update the data and check if the data is okay
             dataOk, matm, Objectsdata = update()
+            if DEBUG:
+                print('Date of sample :', datetime.datetime.now())
             if dataOk > 0:
                 if count != 0:
                     matf[pos:pos + NUMBER_OF_ROWS] = matm

@@ -1,52 +1,16 @@
 # import necessary libraries for heatmap plotting
-import csv
-from ast import literal_eval
-from pprint import pprint
-from os import listdir
-from os.path import isdir, join
 import numpy as np
-import os
-from numpy import loadtxt
-import matplotlib.pyplot as plt
-import numpy as np
-import os
-import glob
-
-# import necessary libraries for CNN building and data processing
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import pandas as pd
-from sklearn.preprocessing import StandardScaler
+import os
+from os.path import join
+import matplotlib.pyplot as plt
+import glob
 
 DEBUG = False
 
-# CNN class definition 
-
-class CNN(nn.Module):
-    def __init__(self, num_classes):
-        super(CNN, self).__init__()
-        self.layer1 = nn.Sequential(                                # Layers 1 to n
-            nn.Conv2d(1, 16, kernel_size=5, stride=2, padding=2),
-            nn.ReLU())
-        self.layer2 = nn.Sequential(
-            nn.Conv2d(16, 32, kernel_size=5, stride=2, padding=2),
-            nn.ReLU())
-        self.fc = nn.Linear(7*7*32, num_classes)                    # Convolution filter after data has been processed
-
-    def forward(self, x):
-        out = self.layer1(x)
-        out = self.layer2(out)
-        out = out.reshape(out.size(0), -1)
-        out = self.fc(out)
-        return out
-    
-
-##################### Functions #####################
-
 # Readcsv function that returns the data 
 def readCSV(filename):
-    data = loadtxt(filename, dtype = np.float32, delimiter=' ')
+    data = np.loadtxt(filename, dtype = np.float32, delimiter=' ')
     return data
 
 # MIN-MAX Function
@@ -92,7 +56,7 @@ dataset_path = os.getcwd() + "\\Dataset\\" + classname  #dataset path for window
 if DEBUG:
     print('dataset path = ',dataset_path)
 
-filenames = listdir(dataset_path)
+filenames = os.listdir(dataset_path)
 if DEBUG:
     print('filenames = ',filenames)
 
@@ -105,8 +69,10 @@ csv_files = sorted(glob.glob(os.path.join(dataset_path, '*.csv')))
 if DEBUG:
     print('csv_files : ',csv_files)
 
+ 
 # loop over the list of csv files
 count = 0
+plt.ion()
 for f in csv_files[count:count+50]:
     # read the csv file
     heatmap = readCSV(f)
@@ -117,17 +83,8 @@ for f in csv_files[count:count+50]:
     plt.imshow(df, cmap='Spectral_r', interpolation='nearest', aspect='auto')
     plt.title(csv_files[count]+'_new')
     plt.show()
+    plt.pause(0.25)
     energia_calculada = np.sum(np.power(df, 2))     # Calculate energy deployed on each frame
     print(energia_calculada)  
     count+=1
 
-
-
-##################### CNN usage #####################
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')     # On GPU if cuda is avalaible
-model = CNN(10).to(device)
-
-for f in csv_files:
-    data = pd.read_csv(f)
-    features = data.iloc[:,:-1].values
-    labels = data.iloc[:,-1].values
