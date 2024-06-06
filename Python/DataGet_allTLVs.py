@@ -4,11 +4,12 @@ import sys
 import serial
 import time
 import numpy as np
+import pandas as pd
 
 from parser_mmw_demo import parser_one_mmw_demo_output_packet
 
 # Configuration file name
-configFileName = os.getcwd() + '/config_file_gics.cfg'
+configFileName = os.getcwd() + '/config_file_points.cfg'
 
 # Number of rows and columns for TLV type 5
 NUMBER_OF_ROWS = 63
@@ -216,6 +217,7 @@ def RangeDopplerHM(byteBuffer):
     subFrameNumber = np.matmul(byteBuffer[idX:idX + 4], word)
     idX += 4
 
+    print('numTLVs :',numTLVs)
     # Read the TLV messages
     for tlvIdx in range(numTLVs):
         # Check the header of the TLV message to find type and length of it
@@ -228,12 +230,23 @@ def RangeDopplerHM(byteBuffer):
         if DEBUG:
             print('\n tlv length :', tlv_length)
 
-        #if tlv_type == 1:                      # Add later, to gather information on detected points
+        # Read the data if TLV type 1 (Detected points) detected
+        if tlv_type == 1:
+            num_points = tlv_length/16
+            if DEBUG:
+                print(num_points,"points detected")
+            vect = byteBuffer[idX:idX + tlv_length].view(np.uint32)     # Data vector
+            points_array = np.zeros([int(num_points),4],dtype='uint32')
+            points_array = vect.reshape(int(num_points),4)
+            if DEBUG:
+                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
+                points_df = pd.DataFrame(points_array,columns=labels)
+                print(points_df)
 
-        # Read the data if TLV type 5 detected
+
+        # Read the data if TLV type 5 (Doppler heatmap) detected
         if tlv_type == 5:
             if DEBUG:
-                print("TYPE 5 TLV!!")
                 print(compteur)
             compteur += 1
             resultSize = NUMBER_OF_COLUMNS * (NUMBER_OF_ROWS + 1) * np.dtype(np.uint16).itemsize
@@ -251,7 +264,6 @@ def RangeDopplerHM(byteBuffer):
                 result = np.transpose(rest)
                 # Remove DC value from matrix
                 mat = result[1:, :]
-                idX += tlv_length
                 if mat.shape == (NUMBER_OF_ROWS, NUMBER_OF_COLUMNS):
                     dataOK = 1
                     print(mat, '\n')
@@ -260,8 +272,22 @@ def RangeDopplerHM(byteBuffer):
                     print("Invalid Matrix")
                     return dataOK, mat
                 break
-            else:   # If the TLV is of other type than 5
-                idX += tlv_length
+        
+        # Read the data if TLV type 7 (Side info on Detected points) detected
+        if tlv_type == 7:
+            num_points = tlv_length/4
+            if DEBUG:
+                print(num_points,"points detected")
+            vect_pi = byteBuffer[idX:idX + tlv_length].view(np.uint16)     # Data vector
+            pointsinfo_array = np.zeros([int(num_points),2],dtype='uint16')
+            pointsinfo_array = vect_pi.reshape(int(num_points),2)
+            if DEBUG:
+                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
+                points_array = np.concatenate((points_array,pointsinfo_array), axis=1)
+                points_df = pd.DataFrame(points_array,columns=labels)
+                print(points_df)
+
+        idX += tlv_length   #Check next TLV
     return dataOK, mat
 
 # ------------------------------------------------------------------
@@ -333,7 +359,7 @@ def main():
                     pos += NUMBER_OF_ROWS
                 count += 1
             if count == (num + 1):
-                saveM()
+                #saveM()
                 CLIport.write(('sensorStop\n').encode())
                 CLIport.close()
                 Dataport.close()
