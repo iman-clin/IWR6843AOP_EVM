@@ -41,12 +41,6 @@ def min_max(in_files):
     print("MIN: " + str(min) + "\tMAX: " + str(max))
             
     return min, max
- 
-def readCSVforCNN(filename):
-    data = pd.read_csv(filename)
-    return data
-
-
 
 ##################### Loop for heatmap printing #####################
 
