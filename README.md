@@ -33,3 +33,5 @@ The second one will create a `.npz` from one class of the local dataset. It shou
 **Doppler_heatmap_multiclass_training_local :**
 
 Build a CNN model and train it based on the keras/tensorflow models. It will use the the dataset prepared as a `.npz` file to train, test and validate the model. Also plot the accuracy and loss of the model and test the prediction on a testing dataset.
+
+[Google colab notebook for online training](https://drive.google.com/file/d/1OV4RE8pCYmDNoZVx6Gf-anxS9c_T9hl8/view?usp=sharing)

@@ -6,8 +6,6 @@ import time
 import numpy as np
 import pandas as pd
 
-from parser_mmw_demo import parser_one_mmw_demo_output_packet
-
 # Configuration file name
 configFileName = os.getcwd() + '/config_file_points.cfg'
 
@@ -281,14 +279,13 @@ def RangeDopplerHM(byteBuffer):
             vect_pi = byteBuffer[idX:idX + tlv_length].view(np.uint16)     # Data vector
             pointsinfo_array = np.zeros([int(num_points),2],dtype='uint16')
             pointsinfo_array = vect_pi.reshape(int(num_points),2)
-            if DEBUG:
-                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
-                points_array = np.concatenate((points_array,pointsinfo_array), axis=1)
-                points_df = pd.DataFrame(points_array,columns=labels)
-                print(points_df)
+            points_array = np.concatenate((points_array,pointsinfo_array), axis=1)
+            labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
+            points_df = pd.DataFrame(points_array,columns=labels)
+            print(points_df)
 
-        idX += tlv_length   #Check next TLV
-    return dataOK, mat
+        idX += tlv_length   # Check next TLV
+    return dataOK, mat      # Later return points_array too, find a way to save the infos a csv file
 
 # ------------------------------------------------------------------
 
