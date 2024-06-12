@@ -15,7 +15,7 @@ configFileName = os.getcwd() + '\\config_file_points.cfg'
 model_name = os.getcwd() + '\\all_targets_1605_5349.h5'
 min_m = 1605.0
 max_m = 5349.0
-THRESHOLD = 0.9
+THRESHOLD = 0.95
 
 # Number of rows and columns for heatmap sample
 NUMBER_OF_ROWS = 63
@@ -37,7 +37,7 @@ magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
 
 ObjectsData = 0
 
-DEBUG = True
+DEBUG = False
 
 # ------------------------------------------------------------------
 
@@ -223,7 +223,9 @@ def parseData68xx(byteBuffer):
     subFrameNumber = np.matmul(byteBuffer[idX:idX + 4], word)
     idX += 4
 
-    print('numTLVs :',numTLVs)
+    print("Sample #",compteur)
+    if DEBUG:
+        print('numTLVs :',numTLVs)
     # Read the TLV messages
     for tlvIdx in range(numTLVs):
         # Check the header of the TLV message to find type and length of it
@@ -286,7 +288,7 @@ def parseData68xx(byteBuffer):
                 mat = result[1:, :]
                 if mat.shape == (NUMBER_OF_ROWS, NUMBER_OF_COLUMNS):
                     dataOK = 1
-                    print(mat, '\n')
+                    print(mat)
                 else:
                     dataOK = 0
                     print("Invalid Matrix")
@@ -304,7 +306,7 @@ def parseData68xx(byteBuffer):
             points_array = np.concatenate((points_array,pointsinfo_array), axis=1)
             labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
             points_df = pd.DataFrame(points_array,columns=labels)
-            print(points_df)
+            print(points_df,'\n')
 
         idX += tlv_length   # Check next TLV
     return dataOK           # Later return points_array too, find a way to add the infos to CNN data
@@ -321,26 +323,21 @@ def update():
     global inpt
     dataOk = 0
     clas = 'classe'
-    result = []
+    pred = []
 
     # Read and parse the received data
     PacketBuffer = readData(Dataport)
     dataOk = parseData68xx(PacketBuffer)
-    
-    pred = []
     if dataOk > 0:
-        #start = time.process_time()
         # Calculate the probability of classes
         rt = model.predict(inpt, verbose=0)
-        result.append(float(rt[0][0]))
-        print(result)
-        if result[0] > 0.5:
+        pred.append(float(rt[0][0]))
+        print("Idle probability :",pred)
+        if pred[0] > 1-THRESHOLD:
             clas = label[0]
         else:
             clas = label[1]
-        print("Class: ")
-        print(clas)
-        print("\n")
+        print("Class :",clas,"\n")
 
     return dataOk, clas
 
@@ -368,11 +365,8 @@ def infinite_loop():
             else:
                 imageLabel.config(image = blackB)
             if DEBUG:
-                print("Tempo de execucao: ")
-                print(time.process_time() - start)
-                print("\n")
+                print("Process time :",time.process_time() - start,"\n")
         imageLabel.after(1, infinite_loop)
-        #time.sleep(0.1) # Sampling frequency of 10 Hz
     # Stop the program and close everything if Ctrl + c is pressed
     except KeyboardInterrupt:
         CLIport.write(('sensorStop\n').encode())
@@ -428,9 +422,6 @@ exit_btn.pack(side = 'bottom', pady = 3)
 
 # Main loop 
 def Main_Program():
-    global CLIport
-    global Dataport
-    global configParameters
     global model, model_name
     
     # Load CNN model
