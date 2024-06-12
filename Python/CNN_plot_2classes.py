@@ -1,25 +1,35 @@
-import datetime
 import os
 import sys
 import serial
 import time
 import numpy as np
 import pandas as pd
+import tkinter as tk
+from PIL import ImageTk, Image
+from keras import models
 
 # Configuration file name
-configFileName = os.getcwd() + '/config_file_points.cfg'
+configFileName = os.getcwd() + '\\config_file_points.cfg'
 
-# Number of rows and columns for TLV type 5
+# CNN model, min and max values and threshold
+model_name = os.getcwd() + '\\all_targets_1605_5349.h5'
+min_m = 1605.0
+max_m = 5349.0
+THRESHOLD = 0.9
+
+# Number of rows and columns for heatmap sample
 NUMBER_OF_ROWS = 63
 NUMBER_OF_COLUMNS = 128
+DEPTH = 4
 
-# Buffer and useful variables
+# Buffer and useful vars
 CLIport = {}
 Dataport = {}
 
 maxBufferSize = 2**15
 byteBuffer = np.zeros(maxBufferSize, dtype='uint8')
 byteBufferLength = 0
+init = 0
 
 compteur = 0
 
@@ -27,7 +37,7 @@ magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
 
 ObjectsData = 0
 
-DEBUG = False
+DEBUG = True
 
 # ------------------------------------------------------------------
 
@@ -61,6 +71,7 @@ def serialConfig(configFileName):
         print(str(se) + '\n')
         sys.exit()
     return CLIport, Dataport
+
 
 # ------------------------------------------------------------------
 
@@ -121,20 +132,15 @@ def parseConfigFile(configFileName):
 
 # ------------------------------------------------------------------
 
-filelocation = ''
-tipo = 0
+# Function to normalize a matrix
 
-# Function to select data type to record and generate file location
-
-def selectType():
-    global filelocation, tipo
-    os.system('clear')
-    tipo = input("Please Input Class Name \n:>")
-    #filelocation = os.getcwd() + '/DataSet/' +  tipo + '/' + tipo + '_'    #Raspberry's path to create a non existing file 
-    filelocation = os.getcwd() + '\\DataSet\\' + tipo + '\\' + tipo + '_'   #Windows' path to create a non existing file
-    if DEBUG:
-        print('type location = ', filelocation)
-
+def norm(mat):
+    aux_n1 = np.subtract(mat, min_m)
+    aux_n2 = np.divide(aux_n1, (max_m - min_m))
+    norm_mat = aux_n2.reshape(NUMBER_OF_ROWS,
+                              NUMBER_OF_COLUMNS)
+    return norm_mat
+    
 # ------------------------------------------------------------------
 
 #Function to read a full data Packet, from frame header to last data
@@ -190,9 +196,11 @@ def readData(Dataport):
 
 #Function to parse Datas from the read packet
 
-def RangeDopplerHM(byteBuffer):
+def parseData68xx(byteBuffer):
     global NUMBER_OF_COLUMNS, NUMBER_OF_ROWS
-    global res, compteur, mat
+    global res, mat, inpt
+    global init, compteur
+
     dataOK = 0
     word = [1, 2**8, 2**16, 2**24]                                          # word array to convert 4 bytes to a 32 bit number
     idX = 0                                                                 # Initialize the pointer index
@@ -215,9 +223,7 @@ def RangeDopplerHM(byteBuffer):
     subFrameNumber = np.matmul(byteBuffer[idX:idX + 4], word)
     idX += 4
 
-    print("sample #",compteur,":")
-    if DEBUG:
-        print('numTLVs :',numTLVs)
+    print('numTLVs :',numTLVs)
     # Read the TLV messages
     for tlvIdx in range(numTLVs):
         # Check the header of the TLV message to find type and length of it
@@ -262,6 +268,20 @@ def RangeDopplerHM(byteBuffer):
                 rest = np.fft.fftshift(res, axes=(1,))      # put left to center, put center to right
                 # Transpose the input data for better visualization
                 result = np.transpose(rest)
+                # Normalize the data
+                mat = norm(result[1:])
+                if mat.shape == (NUMBER_OF_ROWS, NUMBER_OF_COLUMNS):
+                    if init < 4:
+                        inpt[:, : , : , init, 0] = mat
+                        init += 1
+                        dataOK = 0
+                    else:
+                        dataOK = 1
+                        inpt[:, : , : , 0, 0] = inpt[:, : , : , 1, 0]
+                        inpt[:, : , : , 1, 0] = inpt[:, : , : , 2, 0]
+                        inpt[:, : , : , 2, 0] = inpt[:, : , : , 3, 0]
+                        inpt[:, : , : , 3, 0] = mat
+
                 # Remove DC value from matrix
                 mat = result[1:, :]
                 if mat.shape == (NUMBER_OF_ROWS, NUMBER_OF_COLUMNS):
@@ -270,7 +290,7 @@ def RangeDopplerHM(byteBuffer):
                 else:
                     dataOK = 0
                     print("Invalid Matrix")
-                    return dataOK, mat
+                    return dataOK
                 break
         
         # Read the data if TLV type 7 (Side info on Detected points) detected
@@ -284,91 +304,140 @@ def RangeDopplerHM(byteBuffer):
             points_array = np.concatenate((points_array,pointsinfo_array), axis=1)
             labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
             points_df = pd.DataFrame(points_array,columns=labels)
-            print("\n",points_df,"\n")
+            print(points_df)
 
         idX += tlv_length   # Check next TLV
-    return dataOK, mat      # Later return points_array too, find a way to save the infos a csv file
+    return dataOK           # Later return points_array too, find a way to add the infos to CNN data
+
 
 # ------------------------------------------------------------------
+
+label = ['Idle', 'Presence']    # Labels
 
 # Funtion to update the data and display in the plot
 
 def update():
+    global model, THRESHOLD
+    global inpt
+    dataOk = 0
+    clas = 'classe'
+    result = []
+
     # Read and parse the received data
-    PacketBuffer = readData(Dataport)           # Read a frame and store it in the packet Buffer
-    PacketBufferLength = len(PacketBuffer)
-    #ObjectsData = parser_one_mmw_demo_output_packet(PacketBuffer,PacketBufferLength,DEBUG)   # Parse statistics on objects detected, add later to gather more informatons
-    dataOK, matu = RangeDopplerHM(PacketBuffer) # Parse Range-Doppler Heatmap
-    return dataOK, matu
+    PacketBuffer = readData(Dataport)
+    dataOk = parseData68xx(PacketBuffer)
+    
+    pred = []
+    if dataOk > 0:
+        #start = time.process_time()
+        # Calculate the probability of classes
+        rt = model.predict(inpt, verbose=0)
+        result.append(float(rt[0][0]))
+        print(result)
+        if result[0] > 0.5:
+            clas = label[0]
+        else:
+            clas = label[1]
+        print("Class: ")
+        print(clas)
+        print("\n")
+
+    return dataOk, clas
+
 
 # ------------------------------------------------------------------
 
-# Funtion to save all the gathered heatmaps in separated csv files
+# Infinite loop used in the plotting of the current detected class
 
-def saveM():
-    global matf, num
-    count = 0
-    if matf.shape[0] == NUMBER_OF_ROWS * num:
-        for m in range(0, NUMBER_OF_ROWS * num, NUMBER_OF_ROWS):
-            tm = datetime.datetime.now()
-            name = f"{tm.year}_{tm.month}_{tm.day}_{tm.hour}_{tm.minute}_{tm.second}"
-            f = open(filelocation + name + "_" + str(count) + '.csv', 'w')
-            np.savetxt(f, matf[m:m + NUMBER_OF_ROWS], fmt='%d', delimiter=' ')
-            count += 1
-            f.close()
-    else:
-        print("Incorrect Size\n")
-        print(matf.shape[0])
+def infinite_loop():
+    start = time.process_time()
+    dataOk = 0
+    try:
+        # Update the data and check if the data is okay
+        dataOk, clas = update()
+
+        if dataOk > 0:
+            #print("Tempo de execucao: ")
+            #print(time.process_time() - start)
+            if clas == label[0]:
+                imageLabel.config(image = greenB)
+            elif clas == label[1]:
+                imageLabel.config(image = orangeB)
+            #elif clas == label[2]:
+            #    imageLabel.config(image = redB)
+            else:
+                imageLabel.config(image = blackB)
+            if DEBUG:
+                print("Tempo de execucao: ")
+                print(time.process_time() - start)
+                print("\n")
+        imageLabel.after(1, infinite_loop)
+        #time.sleep(0.1) # Sampling frequency of 10 Hz
+    # Stop the program and close everything if Ctrl + c is pressed
+    except KeyboardInterrupt:
         CLIport.write(('sensorStop\n').encode())
         CLIport.close()
         Dataport.close()
-        sys.exit()
+        window.destroy()
+        return
 
 
-# -------------------------    MAIN   ------------------------------
+# ------------------------------------------------------------------
 
-# Main loop      
+# What to do if the exit button is pressed on the application
 
-selectType()
+def exitProgram():
+    CLIport.write(('sensorStop\n').encode())
+    CLIport.close()
+    Dataport.close()
+    window.destroy()
 
-num = int(input("Number of samples: "))
 
-# Configure the serial ports
+# -------------------------    MAIN   -----------------------------------------  
+
+ # Configurate the serial port
 CLIport, Dataport = serialConfig(configFileName)
- 
+
 # Get the configuration parameters from the configuration file
 configParameters = parseConfigFile(configFileName)
 
-mat = np.zeros((NUMBER_OF_ROWS, NUMBER_OF_COLUMNS), dtype=np.float32)
-res = np.zeros((NUMBER_OF_COLUMNS, NUMBER_OF_ROWS + 1), dtype=np.uint16)
-matf = np.zeros((NUMBER_OF_ROWS * num, NUMBER_OF_COLUMNS), dtype=np.float32)
+# Initialize the arrays
+mat = np.zeros((NUMBER_OF_ROWS, NUMBER_OF_COLUMNS), dtype = np.float32)
+res = np.zeros((NUMBER_OF_COLUMNS, NUMBER_OF_ROWS+1), dtype = np.uint16)
+inpt = np.zeros((1, NUMBER_OF_ROWS, NUMBER_OF_COLUMNS, DEPTH, 1), dtype = np.float32)   # Input sample for the CNN
 
-def main():
-    count = 0 
-    pos = 0
-    while True:
-        try:
-            # Update the data and check if the data is okay
-            dataOk, matm = update()
-            if DEBUG:
-                print('Date of sample :', datetime.datetime.now())
-            if dataOk > 0:
-                if count != 0:
-                    matf[pos:pos + NUMBER_OF_ROWS] = matm
-                    pos += NUMBER_OF_ROWS
-                count += 1
-            if count == (num + 1):
-                saveM()
-                CLIport.write(('sensorStop\n').encode())
-                CLIport.close()
-                Dataport.close()
-                break
-        
-        # Stop the program and close everything if Ctrl + c is pressed
-        except KeyboardInterrupt:
-            CLIport.write(('sensorStop\n').encode())
-            CLIport.close()
-            Dataport.close()
-            break
+# Initialize the display window
+window = tk.Tk()
+window.title("First GUI")
+window.geometry("240x300")
 
-main()  # call for main sampling loop
+# Load the colors used to display class on the window
+greenB = ImageTk.PhotoImage(Image.open(os.getcwd() + '\\Images\\greenB.png').resize((238,245)))
+redB = ImageTk.PhotoImage(Image.open(os.getcwd() + '\\Images\\redB.png').resize((238,245)))
+yellowB = ImageTk.PhotoImage(Image.open(os.getcwd() + '\\Images\\yellowB.png').resize((238,245)))
+orangeB = ImageTk.PhotoImage(Image.open(os.getcwd() + '\\Images\\orangeB.png').resize((238,245)))
+blackB = ImageTk.PhotoImage(Image.open(os.getcwd() + '\\Images\\blackB.png').resize((238,245)))
+
+imageLabel = tk.Label(window)
+imageLabel.pack()
+
+# Exit button
+exit_btn= tk.Button(window, text='Exit', width=12,height=2,bg='white',fg='black',command=exitProgram)
+exit_btn.pack(side = 'bottom', pady = 3)
+
+
+# Main loop 
+def Main_Program():
+    global CLIport
+    global Dataport
+    global configParameters
+    global model, model_name
+    
+    # Load CNN model
+    model = models.load_model(model_name)
+
+    infinite_loop()                         # Call for infinite display loop
+
+Main_Program()                          # Call for main loop
+
+window.mainloop()

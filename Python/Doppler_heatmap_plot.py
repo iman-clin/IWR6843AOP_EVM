@@ -67,7 +67,7 @@ if DEBUG:
 # loop over the list of csv files
 count = 0
 plt.ion()
-for f in csv_files[count:count+50]:
+for f in (csv_files):
     # read the csv file
     heatmap = readCSV(f)
     aux_n1 = np.subtract(heatmap, min_m)
@@ -78,7 +78,7 @@ for f in csv_files[count:count+50]:
     plt.title(csv_files[count]+'_new')
     plt.show()
     plt.pause(0.25)
-    energia_calculada = np.sum(np.power(df, 2))     # Calculate energy deployed on each frame
-    print(energia_calculada)  
+    #energia_calculada = np.sum(np.power(df, 2))     # Calculate energy deployed on each frame
+    #print(energia_calculada)  
     count+=1
 
