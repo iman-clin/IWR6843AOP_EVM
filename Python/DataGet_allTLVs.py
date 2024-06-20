@@ -5,13 +5,10 @@ import serial
 import time
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 # Configuration file name
-configFileName = os.getcwd() + '/config_file_points.cfg'
-
-# Number of rows and columns for TLV type 5
-NUMBER_OF_ROWS = 63
-NUMBER_OF_COLUMNS = 128
+configFileName = os.getcwd() + '/config_file_doppler_azimuth.cfg'
 
 # Buffer and useful variables
 CLIport = {}
@@ -27,7 +24,7 @@ magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
 
 ObjectsData = 0
 
-DEBUG = False
+DEBUG = True
 
 # ------------------------------------------------------------------
 
@@ -51,8 +48,6 @@ def serialConfig(configFileName):
         config = [line.rstrip('\r\n') for line in open(configFileName)]
         for i in config:
             CLIport.write((i + '\n').encode())
-            if DEBUG:
-                print(i)
             time.sleep(0.01)
     
     # Exception on serial ports opening
@@ -67,7 +62,7 @@ def serialConfig(configFileName):
 # Function to parse the data inside the configuration file
 
 def parseConfigFile(configFileName):
-    global NUMBER_OF_COLUMNS, NUMBER_OF_ROWS
+    global RANGE_FFT_SIZE, DOPPLER_FFT_SIZE
     configParameters = {} # Initialize an empty dictionary to store the configuration parameters
 
     # Read the configuration file to extract config parameters and frame config
@@ -88,7 +83,6 @@ def parseConfigFile(configFileName):
             idleTime = int(splitWords[3])
             rampEndTime = float(splitWords[5])
             freqSlopeConst = float(splitWords[8])
-            global numAdcSamples
             numAdcSamples = int(splitWords[10])
             numAdcSamplesRoundTo2 = 1
             while numAdcSamples > numAdcSamplesRoundTo2:
@@ -104,7 +98,6 @@ def parseConfigFile(configFileName):
             framePeriodicity = int(splitWords[5])
 
     # Combine the read data to obtain the configuration parameters 
-    global numChirpsPerFrame
     numChirpsPerFrame = (chirpEndIdx - chirpStartIdx + 1) * numLoops
     configParameters["numDopplerBins"] = numChirpsPerFrame / numTxAnt
     configParameters["numRangeBins"] = numAdcSamplesRoundTo2
@@ -113,8 +106,10 @@ def parseConfigFile(configFileName):
     configParameters["dopplerResolutionMps"] = 3e8 / (2 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * configParameters["numDopplerBins"] * numTxAnt)
     configParameters["maxRange"] = (300 * 0.9 * digOutSampleRate) / (2 * freqSlopeConst * 1e3)
     configParameters["maxVelocity"] = 3e8 / (4 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * numTxAnt)
-    NUMBER_OF_COLUMNS = int(configParameters["numRangeBins"])
-    NUMBER_OF_ROWS = int(configParameters["numDopplerBins"] - 1)
+    RANGE_FFT_SIZE = int(configParameters["numRangeBins"])
+    DOPPLER_FFT_SIZE = int(configParameters["numDopplerBins"] - 1)
+    if DEBUG:
+        print(configParameters)
 
     return configParameters
 
@@ -190,9 +185,8 @@ def readData(Dataport):
 
 #Function to parse Datas from the read packet
 
-def RangeDopplerHM(byteBuffer):
-    global NUMBER_OF_COLUMNS, NUMBER_OF_ROWS
-    global res, compteur, mat
+def parseData68xx_AOP(byteBuffer):
+    global res, compteur, mat, mat_ra_hm, QQ
     dataOK = 0
     word = [1, 2**8, 2**16, 2**24]                                          # word array to convert 4 bytes to a 32 bit number
     idX = 0                                                                 # Initialize the pointer index
@@ -215,7 +209,8 @@ def RangeDopplerHM(byteBuffer):
     subFrameNumber = np.matmul(byteBuffer[idX:idX + 4], word)
     idX += 4
 
-    print("sample #",compteur,":")
+    print("\nsample #",compteur,":")
+    compteur += 1
     if DEBUG:
         print('numTLVs :',numTLVs)
     # Read the TLV messages
@@ -223,12 +218,11 @@ def RangeDopplerHM(byteBuffer):
         # Check the header of the TLV message to find type and length of it
         tlv_type = np.matmul(byteBuffer[idX:idX + 4], word)
         idX += 4
-        if DEBUG:
-            print('\n tlv type :', tlv_type)
         tlv_length = np.matmul(byteBuffer[idX:idX + 4], word)
         idX += 4
         if DEBUG:
-            print('\n tlv length :', tlv_length)
+            print('\ntlv type :', tlv_type)
+            print('tlv length :', tlv_length)
 
         # Read the data if TLV type 1 (Detected points) detected
         if tlv_type == 1:
@@ -238,24 +232,18 @@ def RangeDopplerHM(byteBuffer):
             vect = byteBuffer[idX:idX + tlv_length].view(np.uint32)     # Data vector
             points_array = np.zeros([int(num_points),4],dtype='uint32')
             points_array = vect.reshape(int(num_points),4)
-            if DEBUG:
-                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
-                points_df = pd.DataFrame(points_array,columns=labels)
-                print(points_df)
+            #if DEBUG:                                                  # Uncomment if there are no tlv type 7
+                #labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
+                #points_df = pd.DataFrame(points_array,columns=labels)
+                #print(points_df)
 
 
         # Read the data if TLV type 5 (Doppler heatmap) detected
         if tlv_type == 5:
-            if DEBUG:
-                print(compteur)
-            compteur += 1
-            resultSize = NUMBER_OF_COLUMNS * (NUMBER_OF_ROWS + 1) * np.dtype(np.uint16).itemsize
+            resultSize = RANGE_FFT_SIZE * (DOPPLER_FFT_SIZE + 1) * np.dtype(np.uint16).itemsize
             if tlv_length == resultSize:
                 if DEBUG:
                     print("Sizes Matches: ", resultSize)
-                    print("\nRange Bins: ", NUMBER_OF_COLUMNS)
-                    print("\nDoppler Bins: ", NUMBER_OF_ROWS + 1)
-                
                 ares = byteBuffer[idX:idX + resultSize].view(np.uint16) # Data vector
                 res = np.reshape(ares, res.shape)                       # Data array of the right size
                 # Shift the data to the correct position
@@ -264,13 +252,13 @@ def RangeDopplerHM(byteBuffer):
                 result = np.transpose(rest)
                 # Remove DC value from matrix
                 mat = result[1:, :]
-                if mat.shape == (NUMBER_OF_ROWS, NUMBER_OF_COLUMNS):
+                if mat.shape == (DOPPLER_FFT_SIZE, RANGE_FFT_SIZE):
                     dataOK = 1
-                    print(mat, '\n')
+                    print('Range Doppler heatmap data :\n', pd.DataFrame(mat), '\n')
                 else:
                     dataOK = 0
-                    print("Invalid Matrix")
-                    return dataOK, mat
+                    print("Invalid Range Doppler Matrix")
+                    return dataOK, mat, QQ
                 break
         
         # Read the data if TLV type 7 (Side info on Detected points) detected
@@ -286,8 +274,36 @@ def RangeDopplerHM(byteBuffer):
             points_df = pd.DataFrame(points_array,columns=labels)
             print("\n",points_df,"\n")
 
+        # Read the data if TLV type 8 (Range Azimuth Heatmap) detected
+        if tlv_type == 8:
+            expected_size = RANGE_FFT_SIZE * numTxAnt * numRxAnt * np.dtype(np.int16).itemsize * 2    # Expected TLV size : numRangebins * numVirtualAntennas * 2 bytes * 2 (Real + Imag values)
+            print(expected_size)
+            if tlv_length == expected_size:
+                if DEBUG:
+                    print("Sizes Matches: ", expected_size)
+                vect_rahm = byteBuffer[idX:idX + tlv_length].view(np.int16)    # Data vector of the tlv value
+                mat_ra_hm = np.reshape(vect_rahm,(RANGE_FFT_SIZE,numRxAnt*numTxAnt*2)) # Data array of the tlv value, real and imag values in 2 separated cells
+                cmat_ra = np.zeros((RANGE_FFT_SIZE,numRxAnt*numTxAnt),complex)
+                for n in range (RANGE_FFT_SIZE):                                # Reassembling real and imag values in one complex matrix
+                    for m in range(0,numTxAnt*numRxAnt*2,2):
+                        cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
+                #print('cmat:',cmat_ra.shape,pd.DataFrame(cmat_ra))
+                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE+1,axis=1)
+                #print('Q:',Q.shape,pd.DataFrame(Q))
+                QQ = np.fft.fftshift(abs(Q),axes=(1,))                          # Put left to center, put center to right
+                #print('QQ:',QQ.shape,pd.DataFrame(QQ))
+                QQ = QQ[:,2:]                                                   # Cut off first angle bin
+                #print('QQ:',QQ.shape,pd.DataFrame(QQ))
+                if QQ.shape == (RANGE_FFT_SIZE,DOPPLER_FFT_SIZE-1):
+                    dataOK = 1
+                    print('Range Azimuth Heatmap data :\n',pd.DataFrame(QQ),'\n')
+                else:
+                    dataOK = 0
+                    print('Invalid Range Azimuth Matrix')
+                    return dataOK, mat, QQ
+
         idX += tlv_length   # Check next TLV
-    return dataOK, mat      # Later return points_array too, find a way to save the infos a csv file
+    return dataOK, mat, QQ
 
 # ------------------------------------------------------------------
 
@@ -298,22 +314,22 @@ def update():
     PacketBuffer = readData(Dataport)           # Read a frame and store it in the packet Buffer
     PacketBufferLength = len(PacketBuffer)
     #ObjectsData = parser_one_mmw_demo_output_packet(PacketBuffer,PacketBufferLength,DEBUG)   # Parse statistics on objects detected, add later to gather more informatons
-    dataOK, matu = RangeDopplerHM(PacketBuffer) # Parse Range-Doppler Heatmap
-    return dataOK, matu
+    dataOK, matu, mat_ra_hm = parseData68xx_AOP(PacketBuffer) # Parse Range-Doppler Heatmap
+    return dataOK, matu, mat_ra_hm
 
 # ------------------------------------------------------------------
 
 # Funtion to save all the gathered heatmaps in separated csv files
 
-def saveM():
-    global matf, num
+def saveM(matf,n):
+    global num
     count = 0
-    if matf.shape[0] == NUMBER_OF_ROWS * num:
-        for m in range(0, NUMBER_OF_ROWS * num, NUMBER_OF_ROWS):
+    if matf.shape[0] == n * num:
+        for m in range(0, n * num, n):
             tm = datetime.datetime.now()
             name = f"{tm.year}_{tm.month}_{tm.day}_{tm.hour}_{tm.minute}_{tm.second}"
-            f = open(filelocation + name + "_" + str(count) + '.csv', 'w')
-            np.savetxt(f, matf[m:m + NUMBER_OF_ROWS], fmt='%d', delimiter=' ')
+            f = open(filelocation + name + "_" + str(n) + "_" + str(count) + '.csv', 'w')
+            np.savetxt(f, matf[m:m + n], fmt='%d', delimiter=' ')
             count += 1
             f.close()
     else:
@@ -339,26 +355,33 @@ CLIport, Dataport = serialConfig(configFileName)
 # Get the configuration parameters from the configuration file
 configParameters = parseConfigFile(configFileName)
 
-mat = np.zeros((NUMBER_OF_ROWS, NUMBER_OF_COLUMNS), dtype=np.float32)
-res = np.zeros((NUMBER_OF_COLUMNS, NUMBER_OF_ROWS + 1), dtype=np.uint16)
-matf = np.zeros((NUMBER_OF_ROWS * num, NUMBER_OF_COLUMNS), dtype=np.float32)
+mat = np.zeros((DOPPLER_FFT_SIZE, RANGE_FFT_SIZE), dtype=np.float32)
+res = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE + 1), dtype=np.uint16)
+matf = np.zeros((DOPPLER_FFT_SIZE * num, RANGE_FFT_SIZE), dtype=np.float32)
+
+QQ = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE-1), dtype=np.int32)
+mat_ra_hmf = np.zeros((RANGE_FFT_SIZE * num, DOPPLER_FFT_SIZE-1), dtype=np.int32)
 
 def main():
     count = 0 
     pos = 0
+    pos_ra = 0
     while True:
         try:
             # Update the data and check if the data is okay
-            dataOk, matm = update()
+            dataOk, matm, QQ = update()
             if DEBUG:
                 print('Date of sample :', datetime.datetime.now())
             if dataOk > 0:
                 if count != 0:
-                    matf[pos:pos + NUMBER_OF_ROWS] = matm
-                    pos += NUMBER_OF_ROWS
+                    matf[pos:pos + DOPPLER_FFT_SIZE] = matm
+                    pos += DOPPLER_FFT_SIZE
+                    mat_ra_hmf[pos_ra:pos_ra + RANGE_FFT_SIZE] = QQ
+                    pos_ra += RANGE_FFT_SIZE
                 count += 1
             if count == (num + 1):
-                saveM()
+                saveM(matf,DOPPLER_FFT_SIZE)
+                saveM(mat_ra_hmf,RANGE_FFT_SIZE)
                 CLIport.write(('sensorStop\n').encode())
                 CLIport.close()
                 Dataport.close()
