@@ -126,7 +126,7 @@ def selectType():
     os.system('clear')
     tipo = input("Please Input Class Name \n:>")
     #filelocation = os.getcwd() + '/DataSet/' +  tipo + '/' + tipo + '_'    #Raspberry's path to create a non existing file 
-    filelocation = os.getcwd() + '\\DataSet\\' + tipo + '\\' + tipo + '_'   #Windows' path to create a non existing file
+    filelocation = os.getcwd() + '\\DataSet\\' + tipo + '\\'                #Windows' path to create a non existing file
     if DEBUG:
         print('type location = ', filelocation)
 
@@ -321,14 +321,14 @@ def update():
 
 # Funtion to save all the gathered heatmaps in separated csv files
 
-def saveM(matf,n):
+def saveM(matf,n,type):
     global num
     count = 0
     if matf.shape[0] == n * num:
         for m in range(0, n * num, n):
             tm = datetime.datetime.now()
             name = f"{tm.year}_{tm.month}_{tm.day}_{tm.hour}_{tm.minute}_{tm.second}"
-            f = open(filelocation + name + "_" + str(n) + "_" + str(count) + '.csv', 'w')
+            f = open(filelocation + type + "\\" + name + "_" + tipo + "_" + str(count) + '.csv', 'w')
             np.savetxt(f, matf[m:m + n], fmt='%d', delimiter=' ')
             count += 1
             f.close()
@@ -380,8 +380,8 @@ def main():
                     pos_ra += RANGE_FFT_SIZE
                 count += 1
             if count == (num + 1):
-                saveM(matf,DOPPLER_FFT_SIZE)
-                saveM(mat_ra_hmf,RANGE_FFT_SIZE)
+                saveM(matf,DOPPLER_FFT_SIZE,"Doppler")
+                saveM(mat_ra_hmf,RANGE_FFT_SIZE,"Azimuth")
                 CLIport.write(('sensorStop\n').encode())
                 CLIport.close()
                 Dataport.close()

@@ -46,7 +46,7 @@ def min_max(in_files):
 
 classname = input("Please Input Class Name \n:>")
 #dataset_path = os.getcwd() + "/Dataset/"   #dataset path for raspberry
-dataset_path = os.getcwd() + "\\Dataset\\" + classname  #dataset path for windows
+dataset_path = os.getcwd() + "\\Dataset\\" + classname + "\\Doppler" #dataset path for windows
 if DEBUG:
     print('dataset path = ',dataset_path)
 
