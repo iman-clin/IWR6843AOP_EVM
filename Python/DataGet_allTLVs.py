@@ -8,7 +8,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Configuration file name
-configFileName = os.getcwd() + '/config_file_doppler_azimuth.cfg'
+configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth.cfg'
 
 # Buffer and useful variables
 CLIport = {}
@@ -260,6 +260,10 @@ def parseData68xx_AOP(byteBuffer):
                     print("Invalid Range Doppler Matrix")
                     return dataOK, mat, QQ
                 break
+            else:
+                dataOK = 0
+                print("TLV length does not match expected size for Range Doppler data")
+                return dataOK, mat, QQ
         
         # Read the data if TLV type 7 (Side info on Detected points) detected
         if tlv_type == 7:
@@ -301,6 +305,11 @@ def parseData68xx_AOP(byteBuffer):
                     dataOK = 0
                     print('Invalid Range Azimuth Matrix')
                     return dataOK, mat, QQ
+            
+            else:
+                dataOK = 0
+                print("TLV length does not match expected size for Range Azimuth data, check hard coded number of antennas")
+                return dataOK, mat, QQ
 
         idX += tlv_length   # Check next TLV
     return dataOK, mat, QQ
@@ -341,9 +350,7 @@ def saveM(matf,n,type):
         sys.exit()
 
 
-# -------------------------    MAIN   ------------------------------
-
-# Main loop      
+# -------------------------    MAIN   ------------------------------   
 
 selectType()
 
@@ -355,32 +362,36 @@ CLIport, Dataport = serialConfig(configFileName)
 # Get the configuration parameters from the configuration file
 configParameters = parseConfigFile(configFileName)
 
+# Initialize the arrays used in data parsing and saving
+# Range-Doppler arrays
 mat = np.zeros((DOPPLER_FFT_SIZE, RANGE_FFT_SIZE), dtype=np.float32)
 res = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE + 1), dtype=np.uint16)
 matf = np.zeros((DOPPLER_FFT_SIZE * num, RANGE_FFT_SIZE), dtype=np.float32)
-
+# Range-Azimuth arrays
 QQ = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE-1), dtype=np.int32)
-mat_ra_hmf = np.zeros((RANGE_FFT_SIZE * num, DOPPLER_FFT_SIZE-1), dtype=np.int32)
+mat_ra_hmf = np.zeros((RANGE_FFT_SIZE * num, DOPPLER_FFT_SIZE-1), dtype=np.float32)
 
 def main():
+    # Initializing loop vars
     count = 0 
     pos = 0
     pos_ra = 0
+    # Main loop for the right amount of samples
     while True:
         try:
             # Update the data and check if the data is okay
             dataOk, matm, QQ = update()
             if DEBUG:
-                print('Date of sample :', datetime.datetime.now())
+                print('Date of sample :', datetime.datetime.now())  # To check on sample frequency
             if dataOk > 0:
                 if count != 0:
-                    matf[pos:pos + DOPPLER_FFT_SIZE] = matm
+                    matf[pos:pos + DOPPLER_FFT_SIZE] = matm             # Matf will reassemble all Range-Doppler samples in one array for saveM call
                     pos += DOPPLER_FFT_SIZE
-                    mat_ra_hmf[pos_ra:pos_ra + RANGE_FFT_SIZE] = QQ
+                    mat_ra_hmf[pos_ra:pos_ra + RANGE_FFT_SIZE] = QQ     # mat_ra_hmf will reassemble all Range-Azimuth samples in one array for saveM call
                     pos_ra += RANGE_FFT_SIZE
                 count += 1
             if count == (num + 1):
-                saveM(matf,DOPPLER_FFT_SIZE,"Doppler")
+                saveM(matf,DOPPLER_FFT_SIZE,"Doppler")                  # saving all samples in separated csv files
                 saveM(mat_ra_hmf,RANGE_FFT_SIZE,"Azimuth")
                 CLIport.write(('sensorStop\n').encode())
                 CLIport.close()

@@ -14,7 +14,7 @@ DEBUG = False
 
 # Readcsv function that returns the data 
 def readCSV(filename):
-    data = np.loadtxt(filename, dtype = np.uint32, delimiter=' ')
+    data = np.loadtxt(filename, dtype = np.int32, delimiter=' ')
     return data
 
 # MIN-MAX Function
@@ -46,7 +46,7 @@ def min_max(in_files):
             
     return min, max
 
-##################### Loop for heatmap printing #####################
+#### Main ####
 
 classname = input("Please Input Class Name \n:>")
 #dataset_path = os.getcwd() + "/Dataset/"   #dataset path for raspberry
@@ -66,55 +66,49 @@ if DEBUG:
 min_m, max_m = min_max(filenames)
 
 # loop over the list of csv files
+
+# Var initialization
 grid_init = 0
 colorbar_init = 0
 count = 0
-range_res = 0.2143
+range_res = 0.2143                          # Check range_res in config file and adapt before plotting
 
 plt.ion()
 for f in csv_files:
     a = readCSV(f)
 
-    df = np.divide(a, max_m - min_m)
-    df[0,0] = 0
-    df[0,1] = 1
+    df = np.divide(a, max_m - min_m)        # Data normalization
 
     range_bins = a.shape[0]
     angle_bins = a.shape[1]
 
+    # Plotting grid initialization
     if grid_init == 0:
-        theta = np.arcsin(np.linspace(-angle_bins / 2 + 1, angle_bins / 2 - 1, angle_bins) * (2 / angle_bins))
-        range = np.linspace(0, range_bins - 1, range_bins) * range_res
-        range = np.maximum(range,0)
-        #print('theta:',theta.shape,theta)
-        #print('range:',range.shape,range)
-
-        range_depth = range_bins * range_res
+        theta = np.arcsin(np.linspace(-angle_bins / 2 + 1, angle_bins / 2 - 1, angle_bins) * (2 / angle_bins))  # Angular linear space for plotting
+        range = np.linspace(0, range_bins - 1, range_bins) * range_res                                          # Range linear space for plotting
+        range = np.maximum(range,0)                                                                                 # Keep only positive range value (later add range bias correction)
+        range_depth = range_bins * range_res                                                            
         range_width, grid_res = range_depth / 2, 400
 
+        # Grid construction
         posX = np.outer(range, np.sin(theta))
         posY = np.outer(range, np.cos(theta))
-
         xlin = np.linspace(-np.floor(np.max(range)), np.ceil(np.max(range)), angle_bins)
         ylin = np.linspace(0, range_depth, range_bins)
         xgrid, ygrid = np.meshgrid(xlin, ylin)
-
         ra_grid = spi.griddata((posX.flatten(), posY.flatten()), a.flatten(),(xgrid, ygrid), method='nearest')
         grid_init = 1
-
-
-    zi = df.flatten()
-    zi = zi.reshape(ylin.shape[0],xlin.shape[0])
     
-    hmplot = plt.contourf(xlin,ylin,zi,cmap='Spectral_r')
-    hmplot.axes.set_ylim(0,range_depth)
+    hmplot = plt.contourf(xlin,ylin,df,cmap='Spectral_r')
+    hmplot.axes.set_ylim(0,4)
+
     if colorbar_init == 0:
         plt.colorbar(hmplot)
         colorbar_init = 1
     plt.title(csv_files[count])
 
     plt.show()
-    plt.pause(1)
+    plt.pause(2)
     count+=1
 
 plt.ioff()
