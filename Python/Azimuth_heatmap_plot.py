@@ -10,7 +10,7 @@ import scipy.interpolate as spi
 from plot import *
 
 
-DEBUG = False
+DEBUG = True
 
 # Readcsv function that returns the data 
 def readCSV(filename):
@@ -50,7 +50,7 @@ def min_max(in_files):
 
 classname = input("Please Input Class Name \n:>")
 #dataset_path = os.getcwd() + "/Dataset/"   #dataset path for raspberry
-dataset_path = os.getcwd() + "\\Dataset\\" + classname + "\\Azimuth" #dataset path for windows
+dataset_path = os.getcwd() + "\\Dataset\\" + "\\Azimuth\\" + classname #dataset path for windows
 if DEBUG:
     print('dataset path = ',dataset_path)
 
@@ -71,7 +71,7 @@ min_m, max_m = min_max(filenames)
 grid_init = 0
 colorbar_init = 0
 count = 0
-range_res = 0.2143                          # Check range_res in config file and adapt before plotting
+range_res = 0.0436                    # Check range_res in config file and adapt before plotting
 
 plt.ion()
 for f in csv_files:
@@ -87,20 +87,25 @@ for f in csv_files:
         theta = np.arcsin(np.linspace(-angle_bins / 2 + 1, angle_bins / 2 - 1, angle_bins) * (2 / angle_bins))  # Angular linear space for plotting
         range = np.linspace(0, range_bins - 1, range_bins) * range_res                                          # Range linear space for plotting
         range = np.maximum(range,0)                                                                                 # Keep only positive range value (later add range bias correction)
-        range_depth = range_bins * range_res                                                            
-        range_width, grid_res = range_depth / 2, 400
+        range_depth = range_bins * range_res                                                         
+        range_width, grid_res = range_depth/2, 64
+        if DEBUG:
+            print("max_range:",range_depth)
+            print("range bins:",range_bins)
+            print("angle_bins:",angle_bins)
 
         # Grid construction
         posX = np.outer(range, np.sin(theta))
         posY = np.outer(range, np.cos(theta))
-        xlin = np.linspace(-np.floor(np.max(range)), np.ceil(np.max(range)), angle_bins)
+        xlin = np.linspace(-np.floor(range_width), np.ceil(range_width), angle_bins)
         ylin = np.linspace(0, range_depth, range_bins)
         xgrid, ygrid = np.meshgrid(xlin, ylin)
-        ra_grid = spi.griddata((posX.flatten(), posY.flatten()), a.flatten(),(xgrid, ygrid), method='nearest')
+        ra_grid = spi.griddata((posX.flatten(), posY.flatten()), df.flatten(),(xgrid, ygrid), method='cubic')
         grid_init = 1
     
     hmplot = plt.contourf(xlin,ylin,df,cmap='Spectral_r')
-    hmplot.axes.set_ylim(0,4)
+    #hmplot.axes.set_ylim(0,10)
+    #hmplot.axes.set_xlim(-5,5)
 
     if colorbar_init == 0:
         plt.colorbar(hmplot)
@@ -108,7 +113,7 @@ for f in csv_files:
     plt.title(csv_files[count])
 
     plt.show()
-    plt.pause(2)
+    plt.pause(0.25)
     count+=1
 
 plt.ioff()

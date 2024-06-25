@@ -14,7 +14,7 @@ configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth.cfg'
 CLIport = {}
 Dataport = {}
 
-maxBufferSize = 2**15
+maxBufferSize = 2**16
 byteBuffer = np.zeros(maxBufferSize, dtype='uint8')
 byteBufferLength = 0
 
@@ -116,19 +116,19 @@ def parseConfigFile(configFileName):
 
 # ------------------------------------------------------------------
 
-filelocation = ''
-tipo = 0
+dataset_path = ''
+classe = 0
 
 # Function to select data type to record and generate file location
 
 def selectType():
-    global filelocation, tipo
+    global dataset_path, classe
     os.system('clear')
-    tipo = input("Please Input Class Name \n:>")
+    classe = input("Please Input Class Name \n:>")
     #filelocation = os.getcwd() + '/DataSet/' +  tipo + '/' + tipo + '_'    #Raspberry's path to create a non existing file 
-    filelocation = os.getcwd() + '\\DataSet\\' + tipo + '\\'                #Windows' path to create a non existing file
+    dataset_path = os.getcwd() + '\\DataSet\\'                              #Windows' path to create a non existing file
     if DEBUG:
-        print('type location = ', filelocation)
+        print('dataset path = ', dataset_path)
 
 # ------------------------------------------------------------------
 
@@ -162,7 +162,6 @@ def readData(Dataport):
 
             # Check that startIdx is not empty
             if startIdx:
-
                 # Remove the data before the first start index
                 if startIdx[0] > 0 and startIdx[0] < byteBufferLength:
                     byteBuffer[:byteBufferLength - startIdx[0]] = byteBuffer[startIdx[0]:byteBufferLength]
@@ -237,6 +236,40 @@ def parseData68xx_AOP(byteBuffer):
                 #points_df = pd.DataFrame(points_array,columns=labels)
                 #print(points_df)
 
+        # Read the data if TLV type 4 (Range Azimuth Heatmap) detected
+        if tlv_type == 4:
+            expected_size = RANGE_FFT_SIZE * numTxAnt * numRxAnt * np.dtype(np.int16).itemsize * 2    # Expected TLV size : numRangebins * numVirtualAntennas * 2 bytes * 2 (Real + Imag values)
+            if tlv_length == expected_size:
+                if DEBUG:
+                    print("Sizes Matches: ", expected_size)
+                vect_rahm = byteBuffer[idX:idX + tlv_length].view(np.int16)    # Data vector of the tlv value
+                mat_ra_hm = np.reshape(vect_rahm,(RANGE_FFT_SIZE,numRxAnt*numTxAnt*2)) # Data array of the tlv value, real and imag values in 2 separated cells
+                cmat_ra = np.zeros((RANGE_FFT_SIZE,numRxAnt*numTxAnt),complex)
+                for n in range (RANGE_FFT_SIZE):                                # Reassembling real and imag values in one complex matrix
+                    for m in range(0,numTxAnt*numRxAnt*2,2):
+                        cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
+                #print('cmat:',cmat_ra.shape,pd.DataFrame(cmat_ra))
+                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE,axis=1)
+                #Q = np.fft.fftshift(Q,axes=(1,))                                # put left to center, put center to right
+                #print('Q:',Q.shape,pd.DataFrame(Q))
+                QQ = abs(Q)                                                     # Magnitude of the fft
+                #QQ = np.fft.fftshift(QQ,axes=(1,))                             # Put left to center, put center to right
+                #print('QQ:',QQ.shape,pd.DataFrame(QQ))
+                #QQ = QQ[:,2:]                                                   # Cut off first angle bin
+                #print('QQ:',QQ.shape,pd.DataFrame(QQ))
+                if QQ.shape == (RANGE_FFT_SIZE,DOPPLER_FFT_SIZE):
+                    dataOK = 1
+                    print('Range Azimuth Heatmap data :\n',pd.DataFrame(QQ),'\n')
+                else:
+                    dataOK = 0
+                    print('Invalid Range Azimuth Matrix')
+                    return dataOK, mat, QQ
+            
+            else:
+                dataOK = 0
+                print("TLV length does not match expected size for Range Azimuth data, check hard coded number of antennas")
+                return dataOK, mat, QQ
+
 
         # Read the data if TLV type 5 (Doppler heatmap) detected
         if tlv_type == 5:
@@ -278,39 +311,6 @@ def parseData68xx_AOP(byteBuffer):
             points_df = pd.DataFrame(points_array,columns=labels)
             print("\n",points_df,"\n")
 
-        # Read the data if TLV type 8 (Range Azimuth Heatmap) detected
-        if tlv_type == 8:
-            expected_size = RANGE_FFT_SIZE * numTxAnt * numRxAnt * np.dtype(np.int16).itemsize * 2    # Expected TLV size : numRangebins * numVirtualAntennas * 2 bytes * 2 (Real + Imag values)
-            print(expected_size)
-            if tlv_length == expected_size:
-                if DEBUG:
-                    print("Sizes Matches: ", expected_size)
-                vect_rahm = byteBuffer[idX:idX + tlv_length].view(np.int16)    # Data vector of the tlv value
-                mat_ra_hm = np.reshape(vect_rahm,(RANGE_FFT_SIZE,numRxAnt*numTxAnt*2)) # Data array of the tlv value, real and imag values in 2 separated cells
-                cmat_ra = np.zeros((RANGE_FFT_SIZE,numRxAnt*numTxAnt),complex)
-                for n in range (RANGE_FFT_SIZE):                                # Reassembling real and imag values in one complex matrix
-                    for m in range(0,numTxAnt*numRxAnt*2,2):
-                        cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
-                #print('cmat:',cmat_ra.shape,pd.DataFrame(cmat_ra))
-                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE+1,axis=1)
-                #print('Q:',Q.shape,pd.DataFrame(Q))
-                QQ = np.fft.fftshift(abs(Q),axes=(1,))                          # Put left to center, put center to right
-                #print('QQ:',QQ.shape,pd.DataFrame(QQ))
-                QQ = QQ[:,2:]                                                   # Cut off first angle bin
-                #print('QQ:',QQ.shape,pd.DataFrame(QQ))
-                if QQ.shape == (RANGE_FFT_SIZE,DOPPLER_FFT_SIZE-1):
-                    dataOK = 1
-                    print('Range Azimuth Heatmap data :\n',pd.DataFrame(QQ),'\n')
-                else:
-                    dataOK = 0
-                    print('Invalid Range Azimuth Matrix')
-                    return dataOK, mat, QQ
-            
-            else:
-                dataOK = 0
-                print("TLV length does not match expected size for Range Azimuth data, check hard coded number of antennas")
-                return dataOK, mat, QQ
-
         idX += tlv_length   # Check next TLV
     return dataOK, mat, QQ
 
@@ -335,9 +335,10 @@ def saveM(matf,n,type):
     count = 0
     if matf.shape[0] == n * num:
         for m in range(0, n * num, n):
-            tm = datetime.datetime.now()
-            name = f"{tm.year}_{tm.month}_{tm.day}_{tm.hour}_{tm.minute}_{tm.second}"
-            f = open(filelocation + type + "\\" + name + "_" + tipo + "_" + str(count) + '.csv', 'w')
+            if count == 0:
+                tm = datetime.datetime.now()
+                name = f"{tm.year}_{tm.month}_{tm.day}_{tm.hour}_{tm.minute}_{tm.second}"
+            f = open(dataset_path + type + "\\" + classe + "\\" + name + "_" + classe + "_" + str(count) + '.csv', 'w')
             np.savetxt(f, matf[m:m + n], fmt='%d', delimiter=' ')
             count += 1
             f.close()
@@ -368,8 +369,8 @@ mat = np.zeros((DOPPLER_FFT_SIZE, RANGE_FFT_SIZE), dtype=np.float32)
 res = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE + 1), dtype=np.uint16)
 matf = np.zeros((DOPPLER_FFT_SIZE * num, RANGE_FFT_SIZE), dtype=np.float32)
 # Range-Azimuth arrays
-QQ = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE-1), dtype=np.int32)
-mat_ra_hmf = np.zeros((RANGE_FFT_SIZE * num, DOPPLER_FFT_SIZE-1), dtype=np.float32)
+QQ = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE), dtype=np.int32)
+mat_ra_hmf = np.zeros((RANGE_FFT_SIZE * num, DOPPLER_FFT_SIZE), dtype=np.float32)
 
 def main():
     # Initializing loop vars
@@ -391,7 +392,8 @@ def main():
                     pos_ra += RANGE_FFT_SIZE
                 count += 1
             if count == (num + 1):
-                saveM(matf,DOPPLER_FFT_SIZE,"Doppler")                  # saving all samples in separated csv files
+                # here for calibration block
+                saveM(matf,DOPPLER_FFT_SIZE,"Doppler")
                 saveM(mat_ra_hmf,RANGE_FFT_SIZE,"Azimuth")
                 CLIport.write(('sensorStop\n').encode())
                 CLIport.close()
@@ -406,3 +408,11 @@ def main():
             break
 
 main()  # call for main sampling loop
+
+"""                 if classe == 'idle':
+                    saveM(matf,DOPPLER_FFT_SIZE,"Doppler")                  # Calibration only, else save both type whatever happens
+                    saveM(mat_ra_hmf,RANGE_FFT_SIZE,"Azimuth")
+                if classe == 'presence':
+                    saveM(matf,DOPPLER_FFT_SIZE,"Doppler")
+                else:
+                    saveM(mat_ra_hmf,RANGE_FFT_SIZE,"Azimuth")      """    
