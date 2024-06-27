@@ -1,22 +1,41 @@
-import datetime
 import os
 import sys
 import serial
 import time
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import tkinter as tk
+from PIL import ImageTk, Image
+from keras import models
 
 # Configuration file name
-configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x256.cfg'
+configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_16x512.cfg'
 
-# Buffer and useful variables
+# CNN 3d model, min and max values
+model_name_dop = os.getcwd() + '\\all_targets_doppler_1202_4497.h5'
+min_dop = 1425.0
+max_dop = 4975.0
+
+# CNN 2D model, min and max values
+model_name_az = os.getcwd() + '\\all_targets_azimuth_0_11490.h5'
+min_az = 0
+max_az = 18079
+
+THRESHOLD = 0.5                                # Threshold for non-idle probability
+
+# Number of rows and columns for heatmap samples
+NUMBER_ROWS_DOP = 15
+NUMBER_COlUMNS_DOP = 512
+DEPTH = 4
+
+# Buffer and useful vars
 CLIport = {}
 Dataport = {}
 
 maxBufferSize = 2**16
 byteBuffer = np.zeros(maxBufferSize, dtype='uint8')
 byteBufferLength = 0
+init = 0
 
 compteur = 0
 
@@ -24,7 +43,7 @@ magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
 
 ObjectsData = 0
 
-DEBUG = True
+DEBUG = False
 
 # ------------------------------------------------------------------
 
@@ -116,19 +135,24 @@ def parseConfigFile(configFileName):
 
 # ------------------------------------------------------------------
 
-dataset_path = ''
-classe = 0
+# Function to normalize a matrix
 
-# Function to select data type to record and generate file location
-
-def selectType():
-    global dataset_path, classe
-    os.system('clear')
-    classe = input("Please Input Class Name \n:>")
-    #filelocation = os.getcwd() + '/DataSet/' +  tipo + '/' + tipo + '_'    #Raspberry's path to create a non existing file 
-    dataset_path = os.getcwd() + '\\DataSet\\'                              #Windows' path to create a non existing file
-    if DEBUG:
-        print('dataset path = ', dataset_path)
+def norm(mat,type):
+    if type == 'Doppler':
+        aux_n1 = np.subtract(mat, min_dop)
+        aux_n2 = np.divide(aux_n1, (max_dop - min_dop))
+        norm_mat = aux_n2.reshape(NUMBER_ROWS_DOP,
+                                NUMBER_COlUMNS_DOP)
+        return(norm_mat)
+    if type == 'Azimuth':
+        aux_n1 = np.subtract(mat, min_az)
+        aux_n2 = np.divide(aux_n1, (max_az - min_az))
+        norm_mat = aux_n2.reshape(RANGE_FFT_SIZE,
+                                DOPPLER_FFT_SIZE)
+        return (norm_mat)
+    else:
+        print('Invalid data type !')
+        return(mat)
 
 # ------------------------------------------------------------------
 
@@ -181,11 +205,12 @@ def readData(Dataport):
     return byteBuffer
 
 # ------------------------------------------------------------------
-
 #Function to parse Datas from the read packet
 
-def parseData68xx_AOP(byteBuffer):
-    global res, compteur, mat, mat_ra_hm, QQ
+def parseData68xx(byteBuffer):
+    global res, mat, inpt_dop, inpt_az
+    global init, compteur
+
     dataOK = 0
     word = [1, 2**8, 2**16, 2**24]                                          # word array to convert 4 bytes to a 32 bit number
     idX = 0                                                                 # Initialize the pointer index
@@ -208,8 +233,7 @@ def parseData68xx_AOP(byteBuffer):
     subFrameNumber = np.matmul(byteBuffer[idX:idX + 4], word)
     idX += 4
 
-    print("\nsample #",compteur,":")
-    compteur += 1
+    print("Sample #",compteur)
     if DEBUG:
         print('numTLVs :',numTLVs)
     # Read the TLV messages
@@ -217,11 +241,12 @@ def parseData68xx_AOP(byteBuffer):
         # Check the header of the TLV message to find type and length of it
         tlv_type = np.matmul(byteBuffer[idX:idX + 4], word)
         idX += 4
+        if DEBUG:
+            print('\n tlv type :', tlv_type)
         tlv_length = np.matmul(byteBuffer[idX:idX + 4], word)
         idX += 4
         if DEBUG:
-            print('\ntlv type :', tlv_type)
-            print('tlv length :', tlv_length)
+            print('\n tlv length :', tlv_length)
 
         # Read the data if TLV type 1 (Detected points) detected
         if tlv_type == 1:
@@ -231,10 +256,10 @@ def parseData68xx_AOP(byteBuffer):
             vect = byteBuffer[idX:idX + tlv_length].view(np.uint32)     # Data vector
             points_array = np.zeros([int(num_points),4],dtype='uint32')
             points_array = vect.reshape(int(num_points),4)
-            #if DEBUG:                                                  # Uncomment if there are no tlv type 7
-                #labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
-                #points_df = pd.DataFrame(points_array,columns=labels)
-                #print(points_df)
+            if DEBUG:
+                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
+                points_df = pd.DataFrame(points_array,columns=labels)
+                print(points_df)
 
         # Read the data if TLV type 4 (Range Azimuth Heatmap) detected
         if tlv_type == 4:
@@ -248,52 +273,70 @@ def parseData68xx_AOP(byteBuffer):
                 for n in range (RANGE_FFT_SIZE):                                # Reassembling real and imag values in one complex matrix
                     for m in range(0,numTxAnt*numRxAnt*2,2):
                         cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
-                #print('cmat:',cmat_ra.shape,pd.DataFrame(cmat_ra))
                 Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE,axis=1)
-                #Q = np.fft.fftshift(Q,axes=(1,))                                # put left to center, put center to right
-                #print('Q:',Q.shape,pd.DataFrame(Q))
-                QQ = abs(Q)                                                     # Magnitude of the fft
-                np.fliplr(QQ)
-                if QQ.shape == (RANGE_FFT_SIZE,DOPPLER_FFT_SIZE):
+                Q = abs(Q)                                                      # Magnitude of the fft
+                Q = norm(Q,'Azimuth')
+                inpt_az = Q.reshape(1,
+                        RANGE_FFT_SIZE,
+                        DOPPLER_FFT_SIZE,
+                        1)
+                if inpt_az.shape == (1,RANGE_FFT_SIZE,DOPPLER_FFT_SIZE,1):
                     dataOK = 1
-                    print('Range Azimuth Heatmap data :\n',QQ,'\n')
+                    if DEBUG == True:
+                        print('Range Azimuth Heatmap data :',Q,'\n')
                 else:
                     dataOK = 0
                     print('Invalid Range Azimuth Matrix')
-                    return dataOK, mat, QQ
+                    return dataOK
             
             else:
                 dataOK = 0
                 print("TLV length does not match expected size for Range Azimuth data, check hard coded number of antennas")
-                return dataOK, mat, QQ
-
+                return dataOK
 
         # Read the data if TLV type 5 (Doppler heatmap) detected
         if tlv_type == 5:
-            resultSize = RANGE_FFT_SIZE * (DOPPLER_FFT_SIZE + 1) * np.dtype(np.uint16).itemsize
+            if DEBUG:
+                print(compteur)
+            compteur += 1
+            resultSize = NUMBER_COlUMNS_DOP * (NUMBER_ROWS_DOP + 1) * np.dtype(np.uint16).itemsize
             if tlv_length == resultSize:
                 if DEBUG:
                     print("Sizes Matches: ", resultSize)
+                    print("\nRange Bins: ", NUMBER_COlUMNS_DOP)
+                    print("\nDoppler Bins: ", NUMBER_ROWS_DOP + 1)
+                
                 ares = byteBuffer[idX:idX + resultSize].view(np.uint16) # Data vector
                 res = np.reshape(ares, res.shape)                       # Data array of the right size
                 # Shift the data to the correct position
                 rest = np.fft.fftshift(res, axes=(1,))      # put left to center, put center to right
                 # Transpose the input data for better visualization
                 result = np.transpose(rest)
+                # Normalize the data
+                mat = norm(result[1:],'Doppler')
+                if mat.shape == (NUMBER_ROWS_DOP, NUMBER_COlUMNS_DOP):
+                    if init < 4:
+                        inpt_dop[:, : , : , init, 0] = mat
+                        init += 1
+                        dataOK = 0
+                    else:
+                        dataOK = 1
+                        inpt_dop[:, : , : , 0, 0] = inpt_dop[:, : , : , 1, 0]
+                        inpt_dop[:, : , : , 1, 0] = inpt_dop[:, : , : , 2, 0]
+                        inpt_dop[:, : , : , 2, 0] = inpt_dop[:, : , : , 3, 0]
+                        inpt_dop[:, : , : , 3, 0] = mat
+
                 # Remove DC value from matrix
                 mat = result[1:, :]
-                if mat.shape == (DOPPLER_FFT_SIZE, RANGE_FFT_SIZE):
+                if mat.shape == (NUMBER_ROWS_DOP, NUMBER_COlUMNS_DOP):
                     dataOK = 1
-                    print('Range Doppler heatmap data :\n', mat, '\n')
+                    if DEBUG == True:
+                        print('Range Doppler heatmap data:\n',mat,'\n')
                 else:
                     dataOK = 0
-                    print("Invalid Range Doppler Matrix")
-                    return dataOK, mat, QQ
+                    print("Invalid Matrix")
+                    return dataOK
                 break
-            else:
-                dataOK = 0
-                print("TLV length does not match expected size for Range Doppler data")
-                return dataOK, mat, QQ
         
         # Read the data if TLV type 7 (Side info on Detected points) detected
         if tlv_type == 7:
@@ -306,110 +349,140 @@ def parseData68xx_AOP(byteBuffer):
             points_array = np.concatenate((points_array,pointsinfo_array), axis=1)
             labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
             points_df = pd.DataFrame(points_array,columns=labels)
-            print("\n",points_df,"\n")
+            print(points_df,'\n')
 
         idX += tlv_length   # Check next TLV
-    return dataOK, mat, QQ
+    return dataOK           # Later return points_array too, find a way to add the infos to CNN data
+
 
 # ------------------------------------------------------------------
+
+label = ['Idle', 'Presence', 'Object moved']    # Labels
 
 # Funtion to update the data and display in the plot
 
 def update():
+    global model_dop, model_az, THRESHOLD
+    global inpt_dop, inpt_az
+    dataOk = 0
+    clas = 'classe'
+    pred_dop = []
+    pred_az  = []
+
     # Read and parse the received data
-    PacketBuffer = readData(Dataport)           # Read a frame and store it in the packet Buffer
-    PacketBufferLength = len(PacketBuffer)
-    #ObjectsData = parser_one_mmw_demo_output_packet(PacketBuffer,PacketBufferLength,DEBUG)   # Parse statistics on objects detected, add later to gather more informatons
-    dataOK, matu, mat_ra_hm = parseData68xx_AOP(PacketBuffer) # Parse Range-Doppler Heatmap
-    return dataOK, matu, mat_ra_hm
+    PacketBuffer = readData(Dataport)
+    dataOk = parseData68xx(PacketBuffer)
+    if dataOk > 0:
+        # Calculate the probability of classes for 3D CNN
+        rt_dop = model_dop.predict(inpt_dop, verbose=0)
+        print("Class probabilities for moving features:",rt_dop)
+        pred_dop.append(float(rt_dop[0][0]))
+        # Calculate the probability of classes for 2D CNN
+        rt_az = model_az.predict(inpt_az, verbose=0)
+        print("Class probabilities for static features:",rt_az)
+        pred_az.append(float(rt_az[0][0]))
+
+        print("Idle probabilities:\n",'Doppler:',pred_dop,'\n Azimuth:',pred_az)
+        if pred_az[0] > 1-THRESHOLD and pred_dop[0] > 1-THRESHOLD:
+            clas = label[0]
+        elif pred_dop[0] < 1-THRESHOLD:
+            clas = label[1]
+        else:
+            clas = label[2]
+        print("Class :",clas,"\n")
+    return dataOk, clas
+
 
 # ------------------------------------------------------------------
 
-# Funtion to save all the gathered heatmaps in separated csv files
+# Infinite loop used in the plotting of the current detected class
 
-def saveM(matf,n,type):
-    global num
-    count = 0
-    if matf.shape[0] == n * num:
-        for m in range(0, n * num, n):
-            if count == 0:
-                tm = datetime.datetime.now()
-                name = f"{tm.year}_{tm.month}_{tm.day}_{tm.hour}_{tm.minute}_{tm.second}"
-            f = open(dataset_path + type + "\\" + classe + "\\" + name + "_" + classe + "_" + str(count) + '.csv', 'w')
-            np.savetxt(f, matf[m:m + n], fmt='%d', delimiter=' ')
-            count += 1
-            f.close()
-    else:
-        print("Incorrect Size\n")
-        print(matf.shape[0])
+def infinite_loop():
+    start = time.process_time()
+    dataOk = 0
+    try:
+        # Update the data and check if the data is okay
+        dataOk, clas = update()
+
+        if dataOk > 0:
+            #print("Tempo de execucao: ")
+            #print(time.process_time() - start)
+            if clas == label[0]:
+                imageLabel.config(image = greenB)
+            elif clas == label[1]:
+                imageLabel.config(image = orangeB)
+            elif clas == label[2]:
+                imageLabel.config(image = redB)
+            else:
+                imageLabel.config(image = blackB)
+            if DEBUG:
+                print("Process time :",time.process_time() - start,"\n")
+        imageLabel.after(1, infinite_loop)
+    # Stop the program and close everything if Ctrl + c is pressed
+    except KeyboardInterrupt:
         CLIport.write(('sensorStop\n').encode())
         CLIport.close()
         Dataport.close()
-        sys.exit()
+        window.destroy()
+        return
 
 
-# -------------------------    MAIN   ------------------------------   
+# ------------------------------------------------------------------
 
-selectType()
+# What to do if the exit button is pressed on the application
 
-num = int(input("Number of samples: "))
+def exitProgram():
+    CLIport.write(('sensorStop\n').encode())
+    CLIport.close()
+    Dataport.close()
+    window.destroy()
 
-# Configure the serial ports
+
+# -------------------------    MAIN   -----------------------------------------  
+
+ # Configurate the serial port
 CLIport, Dataport = serialConfig(configFileName)
- 
+
 # Get the configuration parameters from the configuration file
 configParameters = parseConfigFile(configFileName)
 
-# Initialize the arrays used in data parsing and saving
-# Range-Doppler arrays
-mat = np.zeros((DOPPLER_FFT_SIZE, RANGE_FFT_SIZE), dtype=np.float32)
-res = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE + 1), dtype=np.uint16)
-matf = np.zeros((DOPPLER_FFT_SIZE * num, RANGE_FFT_SIZE), dtype=np.float32)
-# Range-Azimuth arrays
-QQ = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE), dtype=np.int32)
-mat_ra_hmf = np.zeros((RANGE_FFT_SIZE * num, DOPPLER_FFT_SIZE), dtype=np.float32)
+# Initialize the arrays
+mat = np.zeros((NUMBER_ROWS_DOP, NUMBER_COlUMNS_DOP), dtype = np.float32)
+res = np.zeros((NUMBER_COlUMNS_DOP, NUMBER_ROWS_DOP+1), dtype = np.uint16)
+inpt_dop = np.zeros((1, NUMBER_ROWS_DOP, NUMBER_COlUMNS_DOP, DEPTH, 1), dtype = np.float32)   # Input sample for the CNN
 
-def main():
-    # Initializing loop vars
-    count = 0 
-    pos = 0
-    pos_ra = 0
-    # Main loop for the right amount of samples
-    while True:
-        try:
-            # Update the data and check if the data is okay
-            dataOk, matm, QQ = update()
-            if DEBUG:
-                print('Date of sample :', datetime.datetime.now())  # To check on sample frequency
-            if dataOk > 0:
-                if count != 0:
-                    matf[pos:pos + DOPPLER_FFT_SIZE] = matm             # Matf will reassemble all Range-Doppler samples in one array for saveM call
-                    pos += DOPPLER_FFT_SIZE
-                    mat_ra_hmf[pos_ra:pos_ra + RANGE_FFT_SIZE] = QQ     # mat_ra_hmf will reassemble all Range-Azimuth samples in one array for saveM call
-                    pos_ra += RANGE_FFT_SIZE
-                count += 1
-            if count == (num + 1):
-                # here for calibration block
-                saveM(matf,DOPPLER_FFT_SIZE,"Doppler")
-                saveM(mat_ra_hmf,RANGE_FFT_SIZE,"Azimuth")
-                CLIport.write(('sensorStop\n').encode())
-                CLIport.close()
-                Dataport.close()
-                break
-        
-        # Stop the program and close everything if Ctrl + c is pressed
-        except KeyboardInterrupt:
-            CLIport.write(('sensorStop\n').encode())
-            CLIport.close()
-            Dataport.close()
-            break
+inpt_az = np.zeros((1,RANGE_FFT_SIZE, DOPPLER_FFT_SIZE,1), dtype = np.float32)   # Input sample for the CNN
 
-main()  # call for main sampling loop
+# Initialize the display window
+window = tk.Tk()
+window.title("First GUI")
+window.geometry("240x300")
 
-"""                 if classe == 'idle':
-                    saveM(matf,DOPPLER_FFT_SIZE,"Doppler")                  # Calibration only, else save both type whatever happens
-                    saveM(mat_ra_hmf,RANGE_FFT_SIZE,"Azimuth")
-                if classe == 'presence':
-                    saveM(matf,DOPPLER_FFT_SIZE,"Doppler")
-                else:
-                    saveM(mat_ra_hmf,RANGE_FFT_SIZE,"Azimuth")      """    
+# Load the colors used to display class on the window
+greenB = ImageTk.PhotoImage(Image.open(os.getcwd() + '\\Images\\greenB.png').resize((238,245)))
+redB = ImageTk.PhotoImage(Image.open(os.getcwd() + '\\Images\\redB.png').resize((238,245)))
+yellowB = ImageTk.PhotoImage(Image.open(os.getcwd() + '\\Images\\yellowB.png').resize((238,245)))
+orangeB = ImageTk.PhotoImage(Image.open(os.getcwd() + '\\Images\\orangeB.png').resize((238,245)))
+blackB = ImageTk.PhotoImage(Image.open(os.getcwd() + '\\Images\\blackB.png').resize((238,245)))
+
+imageLabel = tk.Label(window)
+imageLabel.pack()
+
+# Exit button
+exit_btn= tk.Button(window, text='Exit', width=12,height=2,bg='white',fg='black',command=exitProgram)
+exit_btn.pack(side = 'bottom', pady = 3)
+
+
+# Main loop 
+def Main_Program():
+    global model_dop, model_az, model_name_dop, model_name_az
+    
+    # Load CNN models
+    model_dop = models.load_model(model_name_dop)
+    model_az  = models.load_model(model_name_az)
+
+    infinite_loop()                         # Call for infinite display loop
+
+Main_Program()                          # Call for main loop
+
+window.mainloop()

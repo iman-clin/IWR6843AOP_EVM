@@ -9,6 +9,8 @@ import glob
 import scipy.interpolate as spi
 from plot import *
 
+# Configuration file name
+configFileName = os.getcwd() + '\\config_files\\test.cfg'
 
 DEBUG = True
 
@@ -46,6 +48,65 @@ def min_max(in_files):
             
     return min, max
 
+# ------------------------------------------------------------------
+
+# Function to parse the data inside the configuration file
+
+def parseConfigFile(configFileName):
+    global RANGE_FFT_SIZE, DOPPLER_FFT_SIZE
+    configParameters = {} # Initialize an empty dictionary to store the configuration parameters
+
+    # Read the configuration file to extract config parameters and frame config
+    config = [line.rstrip('\r\n') for line in open(configFileName)]
+    for i in config:
+
+        # Split the line
+        splitWords = i.split(" ")
+
+        # Hard code the number of antennas, change if other configuration is used
+        global numRxAnt, numTxAnt
+        numRxAnt = 4
+        numTxAnt = 2
+
+        # Get the information about the profile configuration
+        if "profileCfg" in splitWords[0]:
+            startFreq = int(float(splitWords[2]))
+            idleTime = int(splitWords[3])
+            rampEndTime = float(splitWords[5])
+            freqSlopeConst = float(splitWords[8])
+            numAdcSamples = int(splitWords[10])
+            numAdcSamplesRoundTo2 = 1
+            while numAdcSamples > numAdcSamplesRoundTo2:
+                numAdcSamplesRoundTo2 *= 2
+            digOutSampleRate = int(splitWords[11])
+
+        # Get the information about the frame configuration 
+        elif "frameCfg" in splitWords[0]:
+            chirpStartIdx = int(splitWords[1])
+            chirpEndIdx = int(splitWords[2])
+            numLoops = int(splitWords[3])
+            numFrames = int(splitWords[4])
+            framePeriodicity = int(splitWords[5])
+
+    # Combine the read data to obtain the configuration parameters 
+    numChirpsPerFrame = (chirpEndIdx - chirpStartIdx + 1) * numLoops
+    configParameters["numDopplerBins"] = numChirpsPerFrame / numTxAnt
+    configParameters["numRangeBins"] = numAdcSamplesRoundTo2
+    configParameters["rangeResolutionMeters"] = (3e8 * digOutSampleRate * 1e3) / (2 * freqSlopeConst * 1e12 * numAdcSamples)
+    configParameters["rangeIdxToMeters"] = (3e8 * digOutSampleRate * 1e3) / (2 * freqSlopeConst * 1e12 * configParameters["numRangeBins"])
+    configParameters["dopplerResolutionMps"] = 3e8 / (2 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * configParameters["numDopplerBins"] * numTxAnt)
+    configParameters["maxRange"] = (300 * 0.9 * digOutSampleRate) / (2 * freqSlopeConst * 1e3)
+    configParameters["maxVelocity"] = 3e8 / (4 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * numTxAnt)
+    RANGE_FFT_SIZE = int(configParameters["numRangeBins"])
+    DOPPLER_FFT_SIZE = int(configParameters["numDopplerBins"] - 1)
+    if DEBUG:
+        print(configParameters)
+
+    return configParameters
+
+
+
+
 #### Main ####
 
 classname = input("Please Input Class Name \n:>")
@@ -71,7 +132,12 @@ min_m, max_m = min_max(filenames)
 grid_init = 0
 colorbar_init = 0
 count = 0
-range_res = 0.0436                    # Check range_res in config file and adapt before plotting
+
+# Gather utile infos from config file
+configParameters = parseConfigFile(configFileName)
+range_res = configParameters["rangeResolutionMeters"]
+range_depth = configParameters["maxRange"]
+range_width = range_depth/2
 
 plt.ion()
 for f in csv_files:
@@ -87,12 +153,7 @@ for f in csv_files:
         theta = np.arcsin(np.linspace(-angle_bins / 2 + 1, angle_bins / 2 - 1, angle_bins) * (2 / angle_bins))  # Angular linear space for plotting
         range = np.linspace(0, range_bins - 1, range_bins) * range_res                                          # Range linear space for plotting
         range = np.maximum(range,0)                                                                                 # Keep only positive range value (later add range bias correction)
-        range_depth = range_bins * range_res                                                         
-        range_width, grid_res = range_depth/2, 64
-        if DEBUG:
-            print("max_range:",range_depth)
-            print("range bins:",range_bins)
-            print("angle_bins:",angle_bins)
+        grid_res = 3000
 
         # Grid construction
         posX = np.outer(range, np.sin(theta))
@@ -104,7 +165,7 @@ for f in csv_files:
         grid_init = 1
     
     hmplot = plt.contourf(xlin,ylin,df,cmap='Spectral_r')
-    #hmplot.axes.set_ylim(0,10)
+    hmplot.axes.set_ylim(0,range_depth)
     #hmplot.axes.set_xlim(-5,5)
 
     if colorbar_init == 0:
