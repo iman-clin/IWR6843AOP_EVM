@@ -382,17 +382,19 @@ def update():
     pred_az  = []
 
     # Read and parse the received data
+    readData(Dataport)                      # Skipping first packet, always corrupted for some reason
     PacketBuffer = readData(Dataport)
     dataOk = parseData68xx(PacketBuffer)
     if dataOk > 0:
         # Calculate the probability of classes for 3D CNN
         rt_dop = model_dop.predict(inpt_dop, verbose=0)
-        print("Class probabilities for moving features:",rt_dop)
         pred_dop.append(float(rt_dop[0][0]))
         # Calculate the probability of classes for 2D CNN
         rt_az = model_az.predict(inpt_az, verbose=0)
-        print("Class probabilities for static features:",rt_az)
         pred_az.append(float(rt_az[0][0]))
+        if DEBUG:
+            print("Class probabilities for static features:",rt_az)
+            print("Class probabilities for moving features:",rt_dop)
 
         print("Idle probabilities:\n",'Doppler:',pred_dop,'\n Azimuth:',pred_az)
         if pred_az[0] > 1-THRESHOLD and pred_dop[0] > 1-THRESHOLD:
@@ -401,7 +403,7 @@ def update():
             clas = label[1]
         else:
             clas = label[2]
-        print("Class :",clas,"\n")
+        print("Class :",clas)
     return dataOk, clas
 
 # -------------------------    MAIN   -----------------------------------------  
@@ -435,19 +437,21 @@ def main():
         try:
             if napdetector == 1:
                 sendConfig(configFileName)
-                CLIport.write(('sensorStart\n').encode())
-                time.sleep(0.01)
                 napdetector = 0
             else:
+                start = time.process_time()
                 dataOk, clas = update()
+                if DEBUG:
+                    print("Process time:",time.process_time() - start,"\n")
                 if dataOk == 1:
                     if clas == 'Idle':                                  # Check if anormal activity is detected, if so keep updating at normal rate, else put the sensor in sleep for random time
-                        sleeptime = random.randint(1000000000,5000000000)       # Generating random sleep time between 1 and 5 secs
+                        sleeptime = random.randint(1000000,5000000)       # Generating random sleep time between 1 and 5 secs
                         #sleepCmd = powerDownCmd + str(sleeptime) + '\n'
-                        sendConfig(configIdlePower)                         # Preparing sensor for sleep command
+                        CLIport.write(('sensorStop\n').encode())                         # Preparing sensor for sleep command
+                        time.sleep(0.01)
                         CLIport.write(powerDownCmd.encode())                    # Sending sleep command
-                        print('Nothing detected, sleeping for',sleeptime/1000000000,'s')
-                        time.sleep(sleeptime/1000000000)                    # Hold execution during sleep time
+                        print('Nothing detected, sleeping for',sleeptime/1000000,'s')
+                        time.sleep(sleeptime/1000000)                    # Hold execution during sleep time
                         print('nap ended')
                         napdetector = 1
                 else:
