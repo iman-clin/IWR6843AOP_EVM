@@ -11,8 +11,7 @@ from keras import models
 
 # Configuration file name
 configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x256.cfg'
-configIdlePower = os.getcwd() + '\\idlePowerCycle.cfg'
-powerDownCmd = 'idlePowerDown -1 1 0 1 0 1 0 1 0'
+powerDownCmd = 'idlePowerCycle -1 1 0 1 0 1 0 1 0 '
 
 # CNN 3d model, min and max values
 model_name_dop = os.getcwd() + '\\all_targets_doppler_1241_4860.h5'
@@ -51,9 +50,7 @@ DEBUG = True
 
 # Function to configure the serial ports and send the data from the configuration file to the radar
 
-def serialConfig():
-    global CLIport, Dataport
-
+def serialConfig(CLIportname, Dataportname):
     # Open the serial ports for the configuration and the data ports
     # Raspberry pi   /    Windows 
     try:
@@ -62,8 +59,8 @@ def serialConfig():
         #Dataport = serial.Serial('/dev/ttyUSB1', 921600)
 
         # next 2 lines for connection on Windows
-        CLIport = serial.Serial(input("mmWave Demo input config port (enhanced port) = "), 115200)
-        Dataport = serial.Serial(input("mmWave Demo input data port = "), 921600)
+        CLIport = serial.Serial(CLIportname, 115200)
+        Dataport = serial.Serial(Dataportname, 921600)
 
     # Exception on serial ports opening
     except serial.SerialException as se:
@@ -382,7 +379,6 @@ def update():
     pred_az  = []
 
     # Read and parse the received data
-    readData(Dataport)                      # Skipping first packet, always corrupted for some reason
     PacketBuffer = readData(Dataport)
     dataOk = parseData68xx(PacketBuffer)
     if dataOk > 0:
@@ -390,26 +386,27 @@ def update():
         rt_dop = model_dop.predict(inpt_dop, verbose=0)
         pred_dop.append(float(rt_dop[0][0]))
         # Calculate the probability of classes for 2D CNN
-        rt_az = model_az.predict(inpt_az, verbose=0)
-        pred_az.append(float(rt_az[0][0]))
+        #rt_az = model_az.predict(inpt_az, verbose=0)
+        #pred_az.append(float(rt_az[0][0]))
         if DEBUG:
-            print("Class probabilities for static features:",rt_az)
+            #print("Class probabilities for static features:",rt_az)
             print("Class probabilities for moving features:",rt_dop)
 
         print("Idle probabilities:\n",'Doppler:',pred_dop,'\n Azimuth:',pred_az)
-        if pred_az[0] > 1-THRESHOLD and pred_dop[0] > 1-THRESHOLD:
+        if pred_dop[0] > 1-THRESHOLD:
             clas = label[0]
-        elif pred_dop[0] < 1-THRESHOLD:
-            clas = label[1]
         else:
-            clas = label[2]
+            clas = label[1]
         print("Class :",clas)
     return dataOk, clas
 
 # -------------------------    MAIN   -----------------------------------------  
 
+CLIportname = input("mmWave Demo input config port (enhanced port) = ")
+Dataportname = input("mmWave Demo input data port = ")
+
 # Configurate the serial port
-CLIport, Dataport = serialConfig()
+CLIport, Dataport = serialConfig(CLIportname,Dataportname)
 
 # Configure the sensor using the configuration file
 sendConfig(configFileName)
@@ -426,7 +423,7 @@ inpt_az = np.zeros((1,RANGE_FFT_SIZE, DOPPLER_FFT_SIZE,1), dtype = np.float32)  
 
 # Main loop 
 def main():
-    global model_dop, model_az, model_name_dop, model_name_az
+    global model_dop, model_az, model_name_dop, model_name_az, CLIport, Dataport
     
     # Load CNN models
     model_dop = models.load_model(model_name_dop)
@@ -436,32 +433,37 @@ def main():
     while True:
         try:
             if napdetector == 1:
+                CLIport.write('resetDevice\n'.encode()) 
+                time.sleep(1)
                 sendConfig(configFileName)
+                time.sleep(0.1)
+                print(CLIport.read(CLIport.in_waiting))
                 napdetector = 0
+            
+            start = time.process_time()
+            dataOk, clas = update()
+            if DEBUG:
+                print("Process time:",time.process_time() - start,"\n")
+            if dataOk == 1:
+                if clas == 'Idle':                                  # Check if anormal activity is detected, if so keep updating at normal rate, else put the sensor in sleep for random time
+                    sleeptime = random.randint(100000,500000)       # Generating random sleep time between 1 and 5 secs
+                    sleepCmd = powerDownCmd + str(sleeptime) + '\n'
+                    print(sleepCmd)
+                    CLIport.write('sensorStop\n'.encode())
+                    time.sleep(0.01)
+                    CLIport.write(sleepCmd.encode())                    # Sending sleep command
+                    print('Nothing detected, sleeping for',sleeptime/100000,'s')
+                    time.sleep(sleeptime/100000)                    # Hold execution during sleep time
+                    print('nap ended')
+                    napdetector = 1
             else:
-                start = time.process_time()
-                dataOk, clas = update()
                 if DEBUG:
-                    print("Process time:",time.process_time() - start,"\n")
-                if dataOk == 1:
-                    if clas == 'Idle':                                  # Check if anormal activity is detected, if so keep updating at normal rate, else put the sensor in sleep for random time
-                        sleeptime = random.randint(1000000,5000000)       # Generating random sleep time between 1 and 5 secs
-                        #sleepCmd = powerDownCmd + str(sleeptime) + '\n'
-                        CLIport.write(('sensorStop\n').encode())                         # Preparing sensor for sleep command
-                        time.sleep(0.01)
-                        CLIport.write(powerDownCmd.encode())                    # Sending sleep command
-                        print('Nothing detected, sleeping for',sleeptime/1000000,'s')
-                        time.sleep(sleeptime/1000000)                    # Hold execution during sleep time
-                        print('nap ended')
-                        napdetector = 1
-                else:
-                    if DEBUG:
-                        print('Error while processing data')
+                    print('Error while processing data')
         except KeyboardInterrupt:
-            CLIport.write(('sensorStop\n').encode())
-            CLIport.close()
-            Dataport.close()
-            break
+                    CLIport.write(('sensorStop\n').encode())
+                    CLIport.close()
+                    Dataport.close()
+                    break
 
 
 main()                          # Call for main loop
