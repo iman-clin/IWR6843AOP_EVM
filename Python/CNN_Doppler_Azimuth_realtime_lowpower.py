@@ -11,7 +11,7 @@ from keras import models
 
 # Configuration file name
 configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x256.cfg'
-powerDownCmd = 'idlePowerCycle -1 1 0 1 0 1 0 1 0 '
+powerDownCmd = 'idlePowerCycle -1 1 0 1 0 1 0 0 0 '
 
 # CNN 3d model, min and max values
 model_name_dop = os.getcwd() + '\\all_targets_doppler_1241_4860.h5'
@@ -446,11 +446,9 @@ def main():
                 print("Process time:",time.process_time() - start,"\n")
             if dataOk == 1:
                 if clas == 'Idle':                                  # Check if anormal activity is detected, if so keep updating at normal rate, else put the sensor in sleep for random time
-                    sleeptime = random.randint(100000,500000)       # Generating random sleep time between 1 and 5 secs
+                    sleeptime = random.randint(1000000,5000000)       # Generating random sleep time between 1 and 5 secs
                     sleepCmd = powerDownCmd + str(sleeptime) + '\n'
                     print(sleepCmd)
-                    CLIport.write('sensorStop\n'.encode())
-                    time.sleep(0.01)
                     CLIport.write(sleepCmd.encode())                    # Sending sleep command
                     print('Nothing detected, sleeping for',sleeptime/100000,'s')
                     time.sleep(sleeptime/100000)                    # Hold execution during sleep time
