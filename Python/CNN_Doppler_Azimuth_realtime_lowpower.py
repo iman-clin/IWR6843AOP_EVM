@@ -23,7 +23,7 @@ model_name_az = os.getcwd() + '\\all_targets_azimuth_0_32185.h5'
 min_az = 0
 max_az = 32185
 
-THRESHOLD = 0.1                                # Threshold for non-idle probability
+THRESHOLD = 0.9                                # Threshold for non-idle probability
 
 # Number of rows and columns for heatmap samples
 NUMBER_ROWS_DOP = 31
@@ -44,7 +44,7 @@ magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
 
 ObjectsData = 0
 
-DEBUG = True
+DEBUG = False
 
 # ------------------------------------------------------------------
 
@@ -366,7 +366,7 @@ def parseData68xx(byteBuffer):
 
 # ------------------------------------------------------------------
 
-label = ['Idle', 'Presence', 'Object moved']    # Labels
+label = ['Idle', 'Presence', 'Object moved', 'Error']    # Labels
 
 # Funtion to update the data and display in the plot
 
@@ -386,17 +386,21 @@ def update():
         rt_dop = model_dop.predict(inpt_dop, verbose=0)
         pred_dop.append(float(rt_dop[0][0]))
         # Calculate the probability of classes for 2D CNN
-        #rt_az = model_az.predict(inpt_az, verbose=0)
-        #pred_az.append(float(rt_az[0][0]))
+        rt_az = model_az.predict(inpt_az, verbose=0)
+        pred_az.append(float(rt_az[0][0]))
         if DEBUG:
-            #print("Class probabilities for static features:",rt_az)
+            print("Class probabilities for static features:",rt_az)
             print("Class probabilities for moving features:",rt_dop)
 
         print("Idle probabilities:\n",'Doppler:',pred_dop,'\n Azimuth:',pred_az)
-        if pred_dop[0] > 1-THRESHOLD:
+        if pred_dop[0] > THRESHOLD and pred_az[0] > THRESHOLD:
             clas = label[0]
-        else:
+        elif pred_dop[0] < THRESHOLD:
             clas = label[1]
+        elif pred_dop[0] > THRESHOLD and pred_az[0] < THRESHOLD:
+            clas = label[2]
+        else:
+            clas = label[3]
         print("Class :",clas)
     return dataOk, clas
 
@@ -434,25 +438,26 @@ def main():
         try:
             if napdetector == 1:
                 CLIport.write('resetDevice\n'.encode()) 
-                time.sleep(1)
+                time.sleep(0.25)
                 sendConfig(configFileName)
-                time.sleep(0.1)
-                print(CLIport.read(CLIport.in_waiting))
                 napdetector = 0
-            
+
             start = time.process_time()
             dataOk, clas = update()
             if DEBUG:
                 print("Process time:",time.process_time() - start,"\n")
+            
             if dataOk == 1:
-                if clas == 'Idle':                                  # Check if anormal activity is detected, if so keep updating at normal rate, else put the sensor in sleep for random time
-                    sleeptime = random.randint(1000000,5000000)       # Generating random sleep time between 1 and 5 secs
+                if clas == 'Idle':                                      # Check if anormal activity is detected, if so keep updating at normal rate, else put the sensor in sleep for random time
+                    sleeptime = random.randint(200000,1000000)          # Generating random sleep time between 1 and 5 secs (conversion 200 000 = 1s)
                     sleepCmd = powerDownCmd + str(sleeptime) + '\n'
-                    print(sleepCmd)
+                    if DEBUG:
+                        print(sleepCmd)
                     CLIport.write(sleepCmd.encode())                    # Sending sleep command
-                    print('Nothing detected, sleeping for',sleeptime/100000,'s')
-                    time.sleep(sleeptime/100000)                    # Hold execution during sleep time
-                    print('nap ended')
+                    print('Nothing detected, sleeping for',sleeptime/180000,'s\n')
+                    time.sleep(sleeptime/180000)                    # Hold execution during sleep time, lowered ratio to be sure sensor has time to wake up
+                    if DEBUG:
+                        print('nap ended')
                     napdetector = 1
             else:
                 if DEBUG:
