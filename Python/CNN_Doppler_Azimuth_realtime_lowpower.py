@@ -23,7 +23,7 @@ model_name_az = os.getcwd() + '\\all_targets_azimuth_0_32185.h5'
 min_az = 0
 max_az = 32185
 
-THRESHOLD = 0.9                                # Threshold for non-idle probability
+THRESHOLD = 0.85                                # Threshold for idle probabilities
 
 # Number of rows and columns for heatmap samples
 NUMBER_ROWS_DOP = 31
@@ -193,7 +193,7 @@ def readData(Dataport):
             # Check that startIdx is not empty
             if startIdx:
                 # Remove the data before the first start index
-                if startIdx[0] >= 0 and startIdx[0] < byteBufferLength:
+                if startIdx[0] > 0 and startIdx[0] < byteBufferLength:
                     byteBuffer[:byteBufferLength - startIdx[0]] = byteBuffer[startIdx[0]:byteBufferLength]
                     byteBuffer[byteBufferLength - startIdx[0]:] = np.zeros(len(byteBuffer[byteBufferLength - startIdx[0]:]), dtype='uint8')
                     byteBufferLength = byteBufferLength - startIdx[0]
@@ -438,10 +438,11 @@ def main():
         try:
             if napdetector == 1:
                 CLIport.write('resetDevice\n'.encode()) 
-                time.sleep(0.25)
+                time.sleep(0.5)
                 sendConfig(configFileName)
                 napdetector = 0
 
+            time.sleep(0.01)
             start = time.process_time()
             dataOk, clas = update()
             if DEBUG:
@@ -454,8 +455,8 @@ def main():
                     if DEBUG:
                         print(sleepCmd)
                     CLIport.write(sleepCmd.encode())                    # Sending sleep command
-                    print('Nothing detected, sleeping for',sleeptime/180000,'s\n')
-                    time.sleep(sleeptime/180000)                    # Hold execution during sleep time, lowered ratio to be sure sensor has time to wake up
+                    print('Nothing detected, sleeping for',sleeptime/200000+0,5,'s\n')
+                    time.sleep(sleeptime/200000+0.5)                    # Hold execution during sleep time, add 500ms to be sure sensor has time to wake up
                     if DEBUG:
                         print('nap ended')
                     napdetector = 1
