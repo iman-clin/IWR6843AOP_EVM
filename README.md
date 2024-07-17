@@ -24,6 +24,20 @@ Recover the data contained in `.csv` files of a user-specified class, processes 
 
 Recover the data contained in `.csv` files of a user-specified class, processes them and display the corresponding Range/Azimuth heatmaps.
 
+***CNN realtime files :***
+
+- **CNN_Doppler_realtime :**\
+ Read and parse the data from the sensor to do real-time class prediction using a pre-trained model. This code will display an application window featuring a color display, each color corresponds to a class detection. This code should be used with a Doppler 3D CNN and config file Doppler only.
+
+- **CNN_Doppler_Azimuth_realtime :**\
+ Same purpose but meant to be used with a pre-trained 3D CNN for class prediction on moving features (Doppler: presence or non-presence detection). And a pre-trained 2D CNN for class prediction on static features (Azimuth: Object moved or room in idle configuration). This code should be used with a Doppler 3D CNN and an Azimuth 2D CNN and config file Doppler_Azimuth
+
+- **CNN_Cat_realtime :**\
+ Same purpose as Doppler Azimuth realtime but meant to be used with a pre-trained 2D CNN using as feature the concatenation of Doppler and Azimuth heatmaps. Not reliable for now even though the CNN training goes well.
+
+- **CNN_Doppler_Azimuth_realtime_lowpower :**\
+ Same purpose as Doppler Azimuth realtime but use a low power configuration of the sensor. If the detected class corresponds to no presence and a room untouched, the sensor is put in sleep mode for a random amount of time between 1 and 5 seconds. This should lower the power consumption and max the sensor lifespan in order to achieve class detection on a long period of time. This code needs a sensor flashed with the custom firmware avalaible in the binaries dir of this repository in order to work properly (modifies the idlePowerCycle and adds the resetDevice CLI commands)
+
 ---
 
 ### Jupyter Files
@@ -34,9 +48,17 @@ The first code will create a `.npz` file from the local dataset and break it in 
 
 The second one will create a `.npz` from one class of the local dataset. It should be used to generate a test dataset that will be used for feature prediction.
 
-**Doppler_heatmap_multiclass_training_local :**
+Diverse versions of the preparing dataset code are available in order to make the trainings easier for all the different CNN types.
+
+**multiclass training local codes :**
 
 Build a CNN model and train it based on the keras/tensorflow models. It will use the the dataset prepared as a `.npz` file to train, test and validate the model. Also plot the accuracy and loss of the model and test the prediction on a testing dataset.
+
+Diverse versions of the multiclass training are available in order to generate the correct pre-trained CNN for the different applications (Doppler only, Doppler/Azimuth, Concatenated features...).
+
+**Standalone CNNs :**
+
+Assembles all the previous files in a single one. Used to make calibration, dataset preparation, CNN training and real time class prediction more easy to use in a single workflow. This code should is still incomplete and features are yet to be added.
 
 [Google colab notebook for online training](https://drive.google.com/file/d/1OV4RE8pCYmDNoZVx6Gf-anxS9c_T9hl8/view?usp=sharing)
 
