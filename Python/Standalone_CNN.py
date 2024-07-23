@@ -1,7 +1,5 @@
-# %% [markdown]
 # ## Section 0 : Initialization
 
-# %%
 # Import libraries
 import os
 from os.path import join, isdir
@@ -26,7 +24,6 @@ from keras.optimizers import Adam,SGD
 from keras.callbacks import TensorBoard
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 
-# %%
 # Constants
 DEBUG = True                # Debug constants for extra prints
 
@@ -34,7 +31,6 @@ RANGE_FFT_SIZE = 256      # Array size of a range-doppler heatmap
 DOPPLER_FFT_SIZE = 31
 DEPTH = 4                   # Depth of a CNN sample
 
-# %%
 # Initialization of Buffer and other useful vars
 CLIport = {}
 Dataport = {}
@@ -985,7 +981,6 @@ history_az = model_az.fit(x_train_az,
 
 # **Section 3.4 : Plotting results (to check models accuracy)**
 
-# %%
 # Plot results for doppler cnn
 import matplotlib.pyplot as plt
 
@@ -1013,7 +1008,6 @@ plt.legend()
 
 plt.show()
 
-# %%
 # Plot results for azimuth cnn
 import matplotlib.pyplot as plt
 
@@ -1021,10 +1015,6 @@ acc = history_az.history['accuracy']
 val_acc = history_az.history['val_accuracy']
 loss = history_az.history['loss']
 val_loss = history_az.history['val_loss']
-#recall = history.history['recall_1']
-#val_recall = history.history['val_recall_1']
-#precision = history.history['precision']
-#val_precision = history.history['val_precision']
 
 
 epochs = range(1, len(acc) + 1)
@@ -1044,6 +1034,11 @@ plt.title('Training and validation loss')
 plt.legend()
 
 plt.show()
+
+# **Section 3.5 : Saving models**
+
+models.save_model(model_az, workDir + '\\' + 'azimuth_cnn.h5')
+models.save_model(model_dop, workDir + '\\' + 'doppler_cnn.h5')
 
 # ## Section 4 : Graphic interface for real time class prediction
 
