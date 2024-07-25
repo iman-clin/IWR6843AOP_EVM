@@ -1,74 +1,57 @@
-# import necessary libraries for heatmap plotting
+# Import necessary libraries for heatmap plotting
 import numpy as np
-import pandas as pd
+import pandas as pd 
 import os
 from os.path import join
 import matplotlib.pyplot as plt
 import matplotlib.patches as pat
 import glob
 import scipy.interpolate as spi
-from plot import *
 
 # Configuration file name
 configFileName = os.getcwd() + '\\config_files\\test.cfg'
 
-DEBUG = True
+DEBUG = False
 
 # Readcsv function that returns the data 
 def readCSV(filename):
-    data = np.loadtxt(filename, dtype = np.int32, delimiter=' ')
+    data = np.loadtxt(filename, dtype=np.int32, delimiter=' ')
     return data
 
 # MIN-MAX Function
 def min_max(in_files):
-    # Numpy arrays to store train, test and val matrix
-    min = 5000
-    max = 0
-    count = 0
+    min_val = 5000
+    max_val = 0
     
-    for index, filenames in enumerate(in_files):
-        # Create path from given filename and target item
-        path = join(dataset_path,filenames)
+    for index, filename in enumerate(in_files):
+        path = join(dataset_path, filename)
         if DEBUG:
-            print('target = ',path)
-        # Check to make sure we're reading a .wav file
+            print('target = ', path)
         if not path.endswith('.csv'):
             continue
         heatmap = readCSV(path)
         if DEBUG:
             print(heatmap.shape)
-        min = np.minimum(min, np.min(heatmap))
-        max = np.maximum(max, np.max(heatmap))
+        min_val = np.minimum(min_val, np.min(heatmap))
+        max_val = np.maximum(max_val, np.max(heatmap))
         if DEBUG:
-            print("MIN: " + str(min) + "\tMAX: " + str(max))
+            print("MIN: " + str(min_val) + "\tMAX: " + str(max_val))
             print(index)
-        count += 1
-    print("Count: " + str(count))
-    print("MIN: " + str(min) + "\tMAX: " + str(max))
-            
-    return min, max
 
-# ------------------------------------------------------------------
+    print("MIN: " + str(min_val) + "\tMAX: " + str(max_val))
+    return min_val, max_val
 
 # Function to parse the data inside the configuration file
-
 def parseConfigFile(configFileName):
-    global RANGE_FFT_SIZE, DOPPLER_FFT_SIZE
-    configParameters = {} # Initialize an empty dictionary to store the configuration parameters
-
-    # Read the configuration file to extract config parameters and frame config
+    configParameters = {}
     config = [line.rstrip('\r\n') for line in open(configFileName)]
     for i in config:
-
-        # Split the line
         splitWords = i.split(" ")
 
-        # Hard code the number of antennas, change if other configuration is used
         global numRxAnt, numTxAnt
         numRxAnt = 4
         numTxAnt = 2
 
-        # Get the information about the profile configuration
         if "profileCfg" in splitWords[0]:
             startFreq = int(float(splitWords[2]))
             idleTime = int(splitWords[3])
@@ -80,7 +63,6 @@ def parseConfigFile(configFileName):
                 numAdcSamplesRoundTo2 *= 2
             digOutSampleRate = int(splitWords[11])
 
-        # Get the information about the frame configuration 
         elif "frameCfg" in splitWords[0]:
             chirpStartIdx = int(splitWords[1])
             chirpEndIdx = int(splitWords[2])
@@ -88,7 +70,6 @@ def parseConfigFile(configFileName):
             numFrames = int(splitWords[4])
             framePeriodicity = int(splitWords[5])
 
-    # Combine the read data to obtain the configuration parameters 
     numChirpsPerFrame = (chirpEndIdx - chirpStartIdx + 1) * numLoops
     configParameters["numDopplerBins"] = numChirpsPerFrame / numTxAnt
     configParameters["numRangeBins"] = numAdcSamplesRoundTo2
@@ -97,84 +78,79 @@ def parseConfigFile(configFileName):
     configParameters["dopplerResolutionMps"] = 3e8 / (2 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * configParameters["numDopplerBins"] * numTxAnt)
     configParameters["maxRange"] = (300 * 0.9 * digOutSampleRate) / (2 * freqSlopeConst * 1e3)
     configParameters["maxVelocity"] = 3e8 / (4 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * numTxAnt)
-    RANGE_FFT_SIZE = int(configParameters["numRangeBins"])
-    DOPPLER_FFT_SIZE = int(configParameters["numDopplerBins"] - 1)
+
     if DEBUG:
         print(configParameters)
 
     return configParameters
 
-
-
-
 #### Main ####
-
 classname = input("Please Input Class Name \n:>")
-#dataset_path = os.getcwd() + "/Dataset/"   #dataset path for raspberry
-dataset_path = os.getcwd() + "\\Dataset\\" + "\\Azimuth\\" + classname #dataset path for windows
+dataset_path = os.getcwd() + "\\Dataset\\" + "Azimuth\\" + classname
+
 if DEBUG:
-    print('dataset path = ',dataset_path)
+    print('dataset path = ', dataset_path)
 
 filenames = os.listdir(dataset_path)
 if DEBUG:
-    print('filenames = ',filenames)
+    print('filenames = ', filenames)
 
-# use glob to get all the csv files in the folder
 csv_files = sorted(glob.glob(os.path.join(dataset_path, '*.csv')))
 if DEBUG:
-    print('csv_files : ',csv_files)
+    print('csv_files : ', csv_files)
 
 min_m, max_m = min_max(filenames)
 
-# loop over the list of csv files
-
-# Var initialization
 grid_init = 0
-colorbar_init = 0
+cb_init = 0
 count = 0
 
-# Gather utile infos from config file
 configParameters = parseConfigFile(configFileName)
 range_res = configParameters["rangeResolutionMeters"]
-range_depth = configParameters["maxRange"]
-range_width = range_depth/2
 
 plt.ion()
 for f in csv_files:
     a = readCSV(f)
-
-    df = np.divide(a, max_m - min_m)        # Data normalization
+    a = (a - min_m) / (max_m - min_m)
 
     range_bins = a.shape[0]
     angle_bins = a.shape[1]
 
-    # Plotting grid initialization
     if grid_init == 0:
-        theta = np.arcsin(np.linspace(-angle_bins / 2 + 1, angle_bins / 2 - 1, angle_bins) * (2 / angle_bins))  # Angular linear space for plotting
-        range = np.linspace(0, range_bins - 1, range_bins) * range_res                                          # Range linear space for plotting
-        range = np.maximum(range,0)                                                                                 # Keep only positive range value (later add range bias correction)
-        grid_res = 3000
+        theta = np.arcsin(np.linspace(-angle_bins / 2 + 1, angle_bins / 2 - 1, angle_bins) * (2 / angle_bins))
+        r = np.array(range(range_bins)) * range_res
 
-        # Grid construction
-        posX = np.outer(range, np.sin(theta))
-        posY = np.outer(range, np.cos(theta))
-        xlin = np.linspace(-np.floor(range_width), np.ceil(range_width), angle_bins)
-        ylin = np.linspace(0, range_depth, range_bins)
-        xgrid, ygrid = np.meshgrid(xlin, ylin)
-        ra_grid = spi.griddata((posX.flatten(), posY.flatten()), df.flatten(),(xgrid, ygrid), method='cubic')
+        range_depth = configParameters["numRangeBins"] * range_res
+        range_width, grid_res = range_depth/2, 400
+
+        posX = np.outer(r.T, np.sin(theta)).flatten()
+        posY = np.outer(r.T, np.cos(theta)).flatten()
+        xlin = np.linspace(-int(range_width), int(range_width), grid_res)
+        ylin = np.linspace(0, range_depth, grid_res)
+
+        xiyi = np.meshgrid(xlin, ylin)
+        fig = plt.figure(figsize=(6, 6))
+        ax = plt.axes()
+        ax.imshow(((0,)*grid_res,) * grid_res, cmap=plt.cm.jet, extent=[-range_width, +range_width, 0, range_depth], alpha=0.95)
+        ax.set_xlabel('Lateral distance along [m]')
+        ax.set_ylabel('Longitudinal distance along [m]')
+
         grid_init = 1
+
+    if DEBUG:
+        print("posX shape:", posX.shape)
+        print("posY shape:", posY.shape)
+        print("a shape:", a.flatten().shape)
+        print("xiyi[0] shape:", xiyi[0].shape)
+        print("xiyi[1] shape:", xiyi[1].shape)
     
-    hmplot = plt.contourf(xlin,ylin,df,cmap='Spectral_r')
-    hmplot.axes.set_ylim(0,range_depth)
-    #hmplot.axes.set_xlim(-5,5)
-
-    if colorbar_init == 0:
-        plt.colorbar(hmplot)
-        colorbar_init = 1
-    plt.title(csv_files[count])
-
+    zi = spi.griddata((posX, posY), a.flatten(), (xiyi[0], xiyi[1]), method='linear')
+    zi = zi.reshape(len(ylin), len(xlin))
+    
+    plt.contourf(xlin, ylin, zi, cmap='jet')
+    plt.title(f)
     plt.show()
-    plt.pause(0.25)
-    count+=1
+    plt.pause(0.5)
+    count += 1
 
 plt.ioff()
