@@ -25,7 +25,7 @@ from keras.callbacks import TensorBoard
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 
 # Constants
-DEBUG = True                # Debug constants for extra prints
+DEBUG = False                # Debug constants for extra prints
 
 RANGE_FFT_SIZE = 256      # Array size of a range-doppler heatmap
 DOPPLER_FFT_SIZE = 31
@@ -46,7 +46,7 @@ compteur = 0
 
 # Directory and file names
 workDir = os.getcwd() + '\\Standalone'
-configFileName = workDir + '\\config_file_doppler_azimuth_32x256.cfg'
+configFileName = workDir + '\\..\\config_files\\test.cfg'
 dataset_path = workDir + "\\Dataset\\"
 
 def serialConfig(configFileName):
@@ -366,6 +366,7 @@ def classAcquisition(class_name,num):
                     pos_dop += DOPPLER_FFT_SIZE
                     matf_az[pos_az:pos_az + RANGE_FFT_SIZE] = hm_az
                     pos_az += RANGE_FFT_SIZE
+                    print('Sample',count,'out of',num,'acquired')
                 count += 1
                 if count == (num + 1):
                     if class_name == 'idle':
@@ -388,7 +389,7 @@ def classAcquisition(class_name,num):
             Dataport.close()
             break
 
-n_class = 120 # number of samples for each class
+n_class = 360 # number of samples for each class
 
 print("Serial connection, make sure the sensor is connected to PC")
 
@@ -418,7 +419,6 @@ if (input("Idle calibration, please remove every moving object from the sensor f
 
 # Create a dictionnary for each input type, store them in a list
 type_list = [name for name in os.listdir(dataset_path) if isdir(join(dataset_path, name))]
-print(type_list)
 
 i = 0
 
@@ -430,18 +430,12 @@ for type in type_list:
     print (type_dict)
     type_list[i] = type_dict
     i += 1
-print(type_list)
 
 # See how many files are in each
 num_samples=0
 for type in type_list:
-        print("input type dictionnary", type)
         for target in type["classes"]:
-                print(target)
-                print(len(os.listdir(join(dataset_path, type["type input"], target))))
                 num_samples += len(os.listdir(join(dataset_path, type["type input"], target)))
-print('Total samples:', num_samples)
-
 # Settings
 perc_keep_samples = 1.0 # 1.0 is keep all samples
 val_ratio = 0.15
@@ -464,7 +458,6 @@ filenames_dict = {}
 y_dict = {}
 
 for type in type_list:
-    print(type)
     files = []
     y = []
 
@@ -472,7 +465,6 @@ for type in type_list:
         filenames = []
         # Keep only a depth multiple number of files to analyze for 3D CNN
         for index, target in enumerate(type["classes"]):
-            print('index',index,',target:',target)
             idx = []
             i_f = [[],[]]
             fln = [[],[]]
@@ -522,7 +514,6 @@ for type in type_list:
     # Keep all files for 2D CNN
         filenames = []
         for index, target in enumerate(type["classes"]):
-            print('index',index,',target:',target)
             idx = []
             i_f = [[],[]]
             fln = [[],[]]
@@ -533,13 +524,10 @@ for type in type_list:
 
     y_dict[type['type input']] = y
     filenames_dict[type['type input']] = filenames
-    print('N for type',type['type input'],":",len(filenames),filenames)
-    print('filenames:',filenames_dict[type['type input']])
-    print("y:",y)
-
-print("Results for all input types :")
-print("y_dict:",y_dict)
-print("filenames_dict:",filenames_dict)
+    if DEBUG:
+        print('N for type',type['type input'],":",len(filenames),filenames)
+        print('filenames:',filenames_dict[type['type input']])
+        print("y:",y)
 
 # Associate filename with true output, add if more input types
 filenames_y_doppler = list(zip(filenames_dict['Doppler'], y_dict['Doppler']))
@@ -553,50 +541,38 @@ random.shuffle(filenames_y_azimuth)
 filenames_doppler, y_doppler = zip(*filenames_y_doppler)
 filenames_azimuth, y_azimuth = zip(*filenames_y_azimuth)
 
-print("Shuffled Doppler y:",y_doppler)
-print("Shuffled Azimuth y:",y_azimuth)
-
 # Only keep the specified number of samples (shorter extraction / training)
 filenames_doppler = filenames_doppler[:int(len(filenames_doppler) * perc_keep_samples)]
 filenames_azimuth = filenames_azimuth[:int(len(filenames_azimuth) * perc_keep_samples)]
-print('Number of samples kept for Doppler:',len(filenames_doppler))
-print('Number of samples kept for Azimuth:',len(filenames_azimuth))
-print('Total number of samples:',len(filenames_doppler)+len(filenames_azimuth))
+if DEBUG:
+    print('Number of samples kept for Doppler:',len(filenames_doppler))
+    print('Number of samples kept for Azimuth:',len(filenames_azimuth))
+    print('Total number of samples:',len(filenames_doppler)+len(filenames_azimuth))
 
 # Calculate validation and test set sizes
 val_set_size_dop = int(len(filenames_doppler) * val_ratio)
 val_set_size_az = int(len(filenames_azimuth) * val_ratio)
 test_set_size_dop = int(len(filenames_doppler) * test_ratio)
 test_set_size_az = int(len(filenames_azimuth) * test_ratio)
-print('Validation set size - Doppler:',val_set_size_dop,'- Azimuth:',val_set_size_az)
-print('Testing set size - Doppler:',test_set_size_dop,'- Azimuth:',test_set_size_az)
 
 # Create filename list for each type
 for type in type_list:
     if type['type input'] == 'Azimuth':
         filenam_az = []
         z_az = []
-        print(type)
         for index, target in enumerate(type['classes']):
-            print(join(dataset_path,type['type input'],target))
             filenam_az.append(os.listdir(join(dataset_path,type['type input'],target)))
             z_az.append(np.ones(len(filenam_az[index])) * index)
-        print(filenam_az)
         filenam_az = [item for sublist in filenam_az for item in sublist]
         z_az = [item for sublist in z_az for item in sublist]
     if type['type input'] == 'Doppler':
         filenam_dop = []
         z_dop = []
-        print(type)
         for index, target in enumerate(type['classes']):
-            print(join(dataset_path,type['type input'],target))
             filenam_dop.append(os.listdir(join(dataset_path,type['type input'],target)))
             z_dop.append(np.ones(len(filenam_dop[index])) * index)
-        print(filenam_dop)
         filenam_dop = [item for sublist in filenam_dop for item in sublist]
         z_dop = [item for sublist in z_dop for item in sublist]
-print('Azimuth:',filenam_az,z_az)
-print('Doppler:',filenam_dop,z_dop)
 
 # Readcsv function that returns the data 
 def readCSV(filename):
@@ -645,15 +621,6 @@ filenames_val_dop = filenames_doppler[:val_set_size_dop]
 filenames_test_dop = filenames_doppler[val_set_size_dop:(val_set_size_dop + test_set_size_dop)]
 filenames_train_dop = filenames_doppler[(val_set_size_dop + test_set_size_dop):]
 
-print('Azimuth:')
-print(len(filenames_train_az))
-print(len(filenames_val_az))
-print(len(filenames_test_az))
-print('Doppler:')
-print(len(filenames_train_dop))
-print(len(filenames_val_dop))
-print(len(filenames_test_dop))
-
 # Break y apart into train, validation, and test sets
 y_orig_val_az = y_azimuth[:val_set_size_az]
 y_orig_test_az = y_azimuth[val_set_size_az:(val_set_size_az + test_set_size_az)]
@@ -663,24 +630,12 @@ y_orig_val_dop = y_doppler[:val_set_size_dop]
 y_orig_test_dop = y_doppler[val_set_size_dop:(val_set_size_dop + test_set_size_dop)]
 y_orig_train_dop = y_doppler[(val_set_size_dop + test_set_size_dop):]
 
-# Values should correspond with previous block
-print('Azimuth:')
-print(len(y_orig_train_az))
-print(len(y_orig_val_az))
-print(len(y_orig_test_az))
-print('Doppler:')
-print(len(y_orig_train_dop))
-print(len(y_orig_val_dop))
-print(len(y_orig_test_dop))
-
 #print(type_list)
 dop_hm = readCSV(join(dataset_path, 'Doppler',type_list[1]['classes'][int(y_orig_train_dop[0])],filenames_train_dop[0][0]))
 NUMBER_ROWS_DOP, NUMBER_COLUMNS_DOP = dop_hm.shape
-print('Doppler heatmap shape :', NUMBER_ROWS_DOP, NUMBER_COLUMNS_DOP)
 
 az_hm = readCSV(join(dataset_path, 'Azimuth',type_list[0]['classes'][int(y_orig_train_az[0])],filenames_train_az[0]))
 NUMBER_ROWS_AZ, NUMBER_COLUMNS_AZ = az_hm.shape
-print('Azimuth heatmap shape :', NUMBER_ROWS_AZ, NUMBER_COLUMNS_AZ)
 
 def build_dataset(in_files, in_y, type):
     if (type['type input']=='Doppler'):
@@ -740,8 +695,6 @@ def build_dataset(in_files, in_y, type):
             out_x[index*(NUMBER_ROWS_DOP):index*(NUMBER_ROWS_DOP)+NUMBER_ROWS_DOP, : , 3] = aux_n2
             
             #print(out_x[index].shape)
-            
-        print("X: " + str(out_x.shape) + "\tY: " + str(len(out_y)))
         
     else:
         # Numpy arrays to store train, test and val matrix
@@ -753,9 +706,7 @@ def build_dataset(in_files, in_y, type):
         out_x = np.zeros((num, NUMBER_COLUMNS_AZ), dtype = np.float32)
         out_y = []
         
-
         for index, filename in enumerate(in_files):
-
             
             # Create path from given filename and target item
             class_list = type['classes']
@@ -768,14 +719,12 @@ def build_dataset(in_files, in_y, type):
             heatmap = readCSV(path)
             
             # Data normalization
-            aux_n1 = np.subtract(heatmap, min_az)
-            aux_n2 = np.divide(aux_n1, (max_az - min_az))
+            #aux_n1 = np.subtract(heatmap, min_az)
+            #aux_n2 = np.divide(aux_n1, (max_az - min_az))
 
-            out_x[index*(NUMBER_ROWS_AZ):index*(NUMBER_ROWS_AZ)+NUMBER_ROWS_AZ, :] = aux_n2
+            out_x[index*(NUMBER_ROWS_AZ):index*(NUMBER_ROWS_AZ)+NUMBER_ROWS_AZ, :] = heatmap
             
             out_y.append(in_y[index])
-            
-        print("X: " + str(out_x.shape) + "\tY: " + str(len(out_y)))
     
             
     return out_x, out_y
@@ -818,8 +767,8 @@ model_file_az='all_targets_azimuth_' + str(int(min_az)) + '_' + str(int(max_az))
 # **Section 3.1 : Reshape database**
 
 #Loading features sets
-features_set_dop = np.load(join(workDir, feature_sets_file_dop))
-features_set_az = np.load(join(workDir, feature_sets_file_az))
+features_set_dop = np.load(join(os.getcwd(), feature_sets_file_dop))
+features_set_az = np.load(join(os.getcwd(), feature_sets_file_az))
 
 # Assign Doppler feature sets
 x_train_dop = features_set_dop['x_train']
@@ -857,6 +806,7 @@ x_test_dop = x_test_dop.reshape(int(x_test_dop.shape[0]/(NUMBER_ROWS_DOP)),
                         DEPTH,
                         1)
 
+print('Doppler :')
 print('number of training samples :',x_train_dop.shape[0])
 print('number of validation samples :',x_val_dop.shape[0])
 print('number of test samples :',x_test_dop.shape[0])
@@ -878,6 +828,7 @@ x_test_az = x_test_az.reshape(int(x_test_az.shape[0]/(NUMBER_ROWS_AZ)),
                           NUMBER_COLUMNS_AZ,
                           1)
 
+print('Azimuth :')
 print('number of training samples :',x_train_az.shape[0])
 print('number of validation samples :',x_val_az.shape[0])
 print('number of test samples :',x_test_az.shape[0])
@@ -944,7 +895,7 @@ model_az.add(Dense(2, activation='sigmoid'))
 # Doppler model training 
 
 # PatientEearly Stopping
-es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=20, restore_best_weights=True)
+es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=15, restore_best_weights=True)
 
 # Add training parameters to model
 model_dop.compile(loss='sparse_categorical_crossentropy',
@@ -953,6 +904,7 @@ model_dop.compile(loss='sparse_categorical_crossentropy',
              metrics=['accuracy'])
 
 # Train
+print('Doppler CNN trainig :')
 history_dop = model_dop.fit(x_train_dop,
                    y_train_dop,
                    epochs=250,
@@ -963,7 +915,7 @@ history_dop = model_dop.fit(x_train_dop,
 # Azimuth model training
 
 # PatientEearly Stopping
-es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=40, restore_best_weights=True)
+es = EarlyStopping(monitor='val_loss', mode='min', verbose=1, patience=15, restore_best_weights=True)
 
 # Add training parameters to model
 model_az.compile(loss='sparse_categorical_crossentropy',
@@ -972,6 +924,7 @@ model_az.compile(loss='sparse_categorical_crossentropy',
              metrics=['accuracy'])
 
 # Train
+print('Azimuth CNN trainig :')
 history_az = model_az.fit(x_train_az,
                    y_train_az,
                    epochs=500,
@@ -1174,7 +1127,7 @@ def parseDataWindow(byteBuffer):
                         cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
                 Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE,axis=1)
                 Q = abs(Q)                                                      # Magnitude of the fft
-                Q = norm(Q,'Azimuth')
+                #Q = norm(Q,'Azimuth')
                 inpt_az = Q.reshape(1,
                         RANGE_FFT_SIZE,
                         DOPPLER_FFT_SIZE,
