@@ -9,23 +9,23 @@ from PIL import ImageTk, Image
 from keras import models
 
 # Configuration file name
-configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_16x512.cfg'
+configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x256_3D.cfg'
 
 # CNN 3d model, min and max values
-model_name_dop = os.getcwd() + '\\all_targets_doppler_1202_4497.h5'
-min_dop = 1425.0
-max_dop = 4975.0
+model_name_dop = os.getcwd() + '\\all_targets_doppler_1045_3598.h5'
+min_dop = 1045.0
+max_dop = 3598.0
 
 # CNN 2D model, min and max values
-model_name_az = os.getcwd() + '\\all_targets_azimuth_0_11490.h5'
+model_name_az = os.getcwd() + '\\all_targets_azimuth_0_10922.h5'
 min_az = 0
-max_az = 18079
+max_az = 10922
 
 THRESHOLD = 0.5                                # Threshold for non-idle probability
 
 # Number of rows and columns for heatmap samples
-NUMBER_ROWS_DOP = 15
-NUMBER_COlUMNS_DOP = 512
+DOPPLER_FFT_SIZE = 31
+RANGE_FFT_SIZE = 256
 DEPTH = 4
 
 # Buffer and useful vars
@@ -125,8 +125,6 @@ def parseConfigFile(configFileName):
     configParameters["dopplerResolutionMps"] = 3e8 / (2 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * configParameters["numDopplerBins"] * numTxAnt)
     configParameters["maxRange"] = (300 * 0.9 * digOutSampleRate) / (2 * freqSlopeConst * 1e3)
     configParameters["maxVelocity"] = 3e8 / (4 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * numTxAnt)
-    RANGE_FFT_SIZE = int(configParameters["numRangeBins"])
-    DOPPLER_FFT_SIZE = int(configParameters["numDopplerBins"] - 1)
     if DEBUG:
         print(configParameters)
 
@@ -141,8 +139,8 @@ def norm(mat,type):
     if type == 'Doppler':
         aux_n1 = np.subtract(mat, min_dop)
         aux_n2 = np.divide(aux_n1, (max_dop - min_dop))
-        norm_mat = aux_n2.reshape(NUMBER_ROWS_DOP,
-                                NUMBER_COlUMNS_DOP)
+        norm_mat = aux_n2.reshape(DOPPLER_FFT_SIZE,
+                                RANGE_FFT_SIZE)
         return(norm_mat)
     if type == 'Azimuth':
         aux_n1 = np.subtract(mat, min_az)
@@ -275,7 +273,7 @@ def parseData68xx(byteBuffer):
                         cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
                 Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE,axis=1)
                 Q = abs(Q)                                                      # Magnitude of the fft
-                Q = norm(Q,'Azimuth')
+                #Q = norm(Q,'Azimuth')
                 inpt_az = Q.reshape(1,
                         RANGE_FFT_SIZE,
                         DOPPLER_FFT_SIZE,
@@ -299,12 +297,12 @@ def parseData68xx(byteBuffer):
             if DEBUG:
                 print(compteur)
             compteur += 1
-            resultSize = NUMBER_COlUMNS_DOP * (NUMBER_ROWS_DOP + 1) * np.dtype(np.uint16).itemsize
+            resultSize = RANGE_FFT_SIZE * (DOPPLER_FFT_SIZE + 1) * np.dtype(np.uint16).itemsize
             if tlv_length == resultSize:
                 if DEBUG:
                     print("Sizes Matches: ", resultSize)
-                    print("\nRange Bins: ", NUMBER_COlUMNS_DOP)
-                    print("\nDoppler Bins: ", NUMBER_ROWS_DOP + 1)
+                    print("\nRange Bins: ", RANGE_FFT_SIZE)
+                    print("\nDoppler Bins: ", DOPPLER_FFT_SIZE + 1)
                 
                 ares = byteBuffer[idX:idX + resultSize].view(np.uint16) # Data vector
                 res = np.reshape(ares, res.shape)                       # Data array of the right size
@@ -314,7 +312,7 @@ def parseData68xx(byteBuffer):
                 result = np.transpose(rest)
                 # Normalize the data
                 mat = norm(result[1:],'Doppler')
-                if mat.shape == (NUMBER_ROWS_DOP, NUMBER_COlUMNS_DOP):
+                if mat.shape == (DOPPLER_FFT_SIZE, RANGE_FFT_SIZE):
                     if init < 4:
                         inpt_dop[:, : , : , init, 0] = mat
                         init += 1
@@ -328,7 +326,7 @@ def parseData68xx(byteBuffer):
 
                 # Remove DC value from matrix
                 mat = result[1:, :]
-                if mat.shape == (NUMBER_ROWS_DOP, NUMBER_COlUMNS_DOP):
+                if mat.shape == (DOPPLER_FFT_SIZE, RANGE_FFT_SIZE):
                     dataOK = 1
                     if DEBUG == True:
                         print('Range Doppler heatmap data:\n',mat,'\n')
@@ -447,9 +445,9 @@ CLIport, Dataport = serialConfig(configFileName)
 configParameters = parseConfigFile(configFileName)
 
 # Initialize the arrays
-mat = np.zeros((NUMBER_ROWS_DOP, NUMBER_COlUMNS_DOP), dtype = np.float32)
-res = np.zeros((NUMBER_COlUMNS_DOP, NUMBER_ROWS_DOP+1), dtype = np.uint16)
-inpt_dop = np.zeros((1, NUMBER_ROWS_DOP, NUMBER_COlUMNS_DOP, DEPTH, 1), dtype = np.float32)   # Input sample for the CNN
+mat = np.zeros((DOPPLER_FFT_SIZE, RANGE_FFT_SIZE), dtype = np.float32)
+res = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE+1), dtype = np.uint16)
+inpt_dop = np.zeros((1, DOPPLER_FFT_SIZE, RANGE_FFT_SIZE, DEPTH, 1), dtype = np.float32)   # Input sample for the CNN
 
 inpt_az = np.zeros((1,RANGE_FFT_SIZE, DOPPLER_FFT_SIZE,1), dtype = np.float32)   # Input sample for the CNN
 

@@ -16,13 +16,13 @@ configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x2
 
 # CNN 3d model, min and max values
 model_name_dop = os.getcwd() + '\\all_targets_doppler_1045_3598.h5'
-min_dop = 1241.0
-max_dop = 4860.0
+min_dop = 1045.0
+max_dop = 3598.0
 
 # CNN 2D model, min and max values
 model_name_az = os.getcwd() + '\\all_targets_azimuth_0_10922.h5'
 min_az = 0
-max_az = 32185
+max_az = 10922
 
 THRESHOLD = 0.1                                # Threshold for non-idle probability
 
@@ -45,7 +45,7 @@ magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
 
 ObjectsData = 0
 
-DEBUG = False
+DEBUG = True
 
 # ------------------------------------------------------------------
 
@@ -96,7 +96,7 @@ def parseConfigFile(configFileName):
         # Hard code the number of antennas, change if other configuration is used
         global numRxAnt, numTxAnt
         numRxAnt = 4
-        numTxAnt = 2
+        numTxAnt = 2                # Number of azimuth antennas only
 
         # Get the information about the profile configuration
         if "profileCfg" in splitWords[0]:
@@ -275,7 +275,7 @@ def parseData68xx(byteBuffer):
                         cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
                 Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE,axis=1)
                 Q = abs(Q)                                                      # Magnitude of the fft
-                #Q = norm(Q,'Azimuth')
+                #Q = ²(Q,'Azimuth')
                 inpt_az = Q.reshape(1,
                         RANGE_FFT_SIZE,
                         DOPPLER_FFT_SIZE,
@@ -332,7 +332,7 @@ def parseData68xx(byteBuffer):
                         print('Range Doppler heatmap data:\n',mat,'\n')
                 else:
                     dataOK = 0
-                    print("Invalid Matrix")
+                    print("TLV length does not match expected size for Range Doppler data, check Range and Doppler FFT sizes vars")
                     return dataOK
                 break
         
@@ -379,7 +379,7 @@ def update():
         rt_az = model_az.predict(inpt_az, verbose=0)
         print("Class probabilities for static features:",rt_az)
         pred_az.append(float(rt_az[0][0]))
-
+        # Update class depending on idle probabilities
         print("Idle probabilities:\n",'Doppler:',pred_dop,'\n Azimuth:',pred_az)
         if pred_az[0] > 1-THRESHOLD and pred_dop[0] > 1-THRESHOLD:
             clas = label[0]
@@ -391,11 +391,14 @@ def update():
 
         dop_hm = inpt_dop[0,:,:,3,0]
         az_hm = inpt_az[0,:,:,0]
+
         return dataOk, clas, dop_hm, az_hm
-    else :
+    
+    else:
+        # Return empty matrices if data not ok
         clas = 'Error'
         print('Acquisition failed')
-        return dataOk, clas, np.zeros(RANGE_FFT_SIZE,DOPPLER_FFT_SIZE), np.zeros(DOPPLER_FFT_SIZE,RANGE_FFT_SIZE)
+        return dataOk, clas, np.zeros((RANGE_FFT_SIZE,DOPPLER_FFT_SIZE),dtype=np.float32), np.zeros((DOPPLER_FFT_SIZE,RANGE_FFT_SIZE),dtype=np.float32)
 
 
 
@@ -425,17 +428,20 @@ def infinite_loop():
                 print("Process time :",time.process_time() - start,"\n")
             dop_plot(dop_hm)
             az_plot(az_hm)
-        imageLabel.after(250, infinite_loop)
+        imageLabel.after(400, infinite_loop)
     # Stop the program and close everything if Ctrl + c is pressed
     except KeyboardInterrupt:
         CLIport.write(('sensorStop\n').encode())
         CLIport.close()
         Dataport.close()
-        window.destroy()
         azimuth_win.destroy()
         doppler_win.destroy()
+        window.destroy()
         return
 
+# ------------------------------------------------------------------
+
+# Plotting functions used to display current Doppler and Azimuth heatmaps
 
 def dop_plot(dop_hm):
     global dop_canvas, dop_axes
@@ -459,9 +465,9 @@ def exitProgram():
     CLIport.write(('sensorStop\n').encode())
     CLIport.close()
     Dataport.close()
-    window.destroy()
     azimuth_win.destroy()
     doppler_win.destroy()
+    window.destroy()
 
 
 # -------------------------    MAIN   -----------------------------------------  
@@ -495,6 +501,7 @@ dop_canvas.get_tk_widget().pack()
 dop_canvas.draw()
 
 # Initialize the Range Azimuth heatmap display window and plot 
+    # Tk window initialization
 azimuth_win = tk.Toplevel(window)
 azimuth_win.title("Azimuth Range heatmap")
 azimuth_win.geometry("500x400")
@@ -507,11 +514,10 @@ az_canvas.draw()
     # Plot initialization
 range_res = configParameters["rangeResolutionMeters"]
 angle_bins, range_bins = DOPPLER_FFT_SIZE, RANGE_FFT_SIZE
-theta = np.arcsin(np.linspace(-angle_bins / 2 + 1, angle_bins / 2 - 1, angle_bins) * (2 / angle_bins))
-r = np.array(range(range_bins)) * range_res
-
 range_depth = configParameters["numRangeBins"] * range_res
 range_width, grid_res = range_depth/2, 400
+theta = np.arcsin(np.linspace(-angle_bins / 2 + 1, angle_bins / 2 - 1, angle_bins) * (2 / angle_bins))
+r = np.array(range(range_bins)) * range_res
 
 posX = np.outer(r.T, np.sin(theta)).flatten()
 posY = np.outer(r.T, np.cos(theta)).flatten()
@@ -552,5 +558,5 @@ Main_Program()                          # Call for main loop
 
 
 doppler_win.mainloop()
+azimuth_win.mainloop()
 window.mainloop()
-#azimuth_win.mainloop()
