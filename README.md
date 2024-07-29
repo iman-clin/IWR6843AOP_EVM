@@ -38,6 +38,9 @@ Recover the data contained in `.csv` files of a user-specified class, processes 
 - **CNN_Doppler_Azimuth_realtime_lowpower :**\
  Same purpose as Doppler Azimuth realtime but use a low power configuration of the sensor. If the detected class corresponds to no presence and a room untouched, the sensor is put in sleep mode for a random amount of time between 1 and 5 seconds. This should lower the power consumption and max the sensor lifespan in order to achieve class detection on a long period of time. This code needs a sensor flashed with the custom firmware avalaible in the binaries dir of this repository in order to work properly (modifies the idlePowerCycle and adds the resetDevice CLI commands)
 
+- **CNN_Doppler_Azimuth_realtime_plotting :**\
+ Add the display of both heatmaps in separated window as well as the class prediction, could be used for a user supervised class prediction.
+
 ---
 
 ### Jupyter Files
