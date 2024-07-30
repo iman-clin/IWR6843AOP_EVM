@@ -25,10 +25,10 @@ from keras.callbacks import TensorBoard
 from keras.callbacks import EarlyStopping, ModelCheckpoint
 
 # Constants
-DEBUG = False                # Debug constants for extra prints
+DEBUG = False               # Debug constants for extra prints
 
-RANGE_FFT_SIZE = 256      # Array size of a range-doppler heatmap
-DOPPLER_FFT_SIZE = 31
+RANGE_FFT_SIZE = 256        # Num range bins
+DOPPLER_FFT_SIZE = 31       # Num azimuth bins - 1
 DEPTH = 4                   # Depth of a CNN sample
 
 # Initialization of Buffer and other useful vars
@@ -46,7 +46,7 @@ compteur = 0
 
 # Directory and file names
 workDir = os.getcwd() + '\\Standalone'
-configFileName = workDir + '\\..\\config_files\\test.cfg'
+configFileName = workDir + '\\..\\config_files\\config_file_doppler_azimuth_32x256_3D.cfg'
 dataset_path = workDir + "\\Dataset\\"
 
 def serialConfig(configFileName):
@@ -122,8 +122,6 @@ def parseConfigFile(configFileName):
     configParameters["dopplerResolutionMps"] = 3e8 / (2 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * configParameters["numDopplerBins"] * numTxAnt)
     configParameters["maxRange"] = (300 * 0.9 * digOutSampleRate) / (2 * freqSlopeConst * 1e3)
     configParameters["maxVelocity"] = 3e8 / (4 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * numTxAnt)
-    RANGE_FFT_SIZE = int(configParameters["numRangeBins"])
-    DOPPLER_FFT_SIZE = int(configParameters["numDopplerBins"] - 1)
     if DEBUG:
         print(configParameters)
 
@@ -252,18 +250,17 @@ def parseData68xx(byteBuffer):
                 if DEBUG:
                     print("Sizes Matches: ", expected_size)
                 
-                vect_az = byteBuffer[idX:idX + tlv_length].view(np.int16)    # Data vector of the tlv value
-                mat_ra_hm = np.reshape(vect_az,(RANGE_FFT_SIZE,numRxAnt*numTxAnt*2)) # Data array of the tlv value, real and imag values in 2 separated cells
-                cmat_ra = np.zeros((RANGE_FFT_SIZE,numRxAnt*numTxAnt),complex)
-                for n in range (RANGE_FFT_SIZE):                                # Reassembling real and imag values in one complex matrix
-                    for m in range(0,numTxAnt*numRxAnt*2,2):
-                        cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
-                mat_az = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE,axis=1)
-                mat_az = abs(mat_az)                                                      # Magnitude of the fft
+                vect_rahm = byteBuffer[idX:idX + tlv_length].view(np.int16)     # Data vector of the tlv value
+                cmat_ra = np.array([[vect_rahm[i] + 1j * vect_rahm[i+1] for i in range(0, len(vect_rahm), 2)]])  # Reassembling real and imag values in one complex matrix
+                cmat_ra = np.reshape(cmat_ra,(RANGE_FFT_SIZE,numTxAnt*numRxAnt))
+                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE+1,axis=1)
+                Q = abs(Q)                                                     # Magnitude of the fft
+                Q = np.fft.fftshift(Q,axes=(1,))                               # Cut off first angle bin
+                mat_az = Q[:,1:]                                                                     # Magnitude of the fft
                 if mat_az.shape == (RANGE_FFT_SIZE,DOPPLER_FFT_SIZE):
                     dataOK = 1
                     if DEBUG == True:
-                        print('Range Azimuth Heatmap data :',mat_az,'\n')
+                        print('Range Azimuth Heatmap data :',QQ,'\n')
                 else:
                     dataOK = 0
                     print('Invalid Range Azimuth Matrix')
@@ -1127,8 +1124,9 @@ def parseDataWindow(byteBuffer):
                         cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
                 Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE,axis=1)
                 Q = abs(Q)                                                      # Magnitude of the fft
-                #Q = norm(Q,'Azimuth')
-                inpt_az = Q.reshape(1,
+                Q = np.fft.fftshift(Q,axes=(1,))
+                QQ = Q[:,1:]
+                inpt_az = QQ.reshape(1,
                         RANGE_FFT_SIZE,
                         DOPPLER_FFT_SIZE,
                         1)

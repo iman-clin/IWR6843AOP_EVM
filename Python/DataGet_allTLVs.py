@@ -8,7 +8,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # Configuration file name
-configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x256.cfg'
+configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x256_3D.cfg'
 
 # Buffer and useful variables
 CLIport = {}
@@ -25,6 +25,9 @@ magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
 ObjectsData = 0
 
 DEBUG = True
+ 
+DOPPLER_FFT_SIZE = 31
+RANGE_FFT_SIZE = 256
 
 # ------------------------------------------------------------------
 
@@ -106,8 +109,6 @@ def parseConfigFile(configFileName):
     configParameters["dopplerResolutionMps"] = 3e8 / (2 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * configParameters["numDopplerBins"] * numTxAnt)
     configParameters["maxRange"] = (300 * 0.9 * digOutSampleRate) / (2 * freqSlopeConst * 1e3)
     configParameters["maxVelocity"] = 3e8 / (4 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * numTxAnt)
-    RANGE_FFT_SIZE = int(configParameters["numRangeBins"])
-    DOPPLER_FFT_SIZE = int(configParameters["numDopplerBins"] - 1)
     if DEBUG:
         print(configParameters)
 
@@ -242,18 +243,13 @@ def parseData68xx_AOP(byteBuffer):
             if tlv_length == expected_size:
                 if DEBUG:
                     print("Sizes Matches: ", expected_size)
-                vect_rahm = byteBuffer[idX:idX + tlv_length].view(np.int16)    # Data vector of the tlv value
-                mat_ra_hm = np.reshape(vect_rahm,(RANGE_FFT_SIZE,numRxAnt*numTxAnt*2)) # Data array of the tlv value, real and imag values in 2 separated cells
-                cmat_ra = np.zeros((RANGE_FFT_SIZE,numRxAnt*numTxAnt),complex)
-                for n in range (RANGE_FFT_SIZE):                                # Reassembling real and imag values in one complex matrix
-                    for m in range(0,numTxAnt*numRxAnt*2,2):
-                        cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
-                #print('cmat:',cmat_ra.shape,pd.DataFrame(cmat_ra))
-                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE,axis=1)
-                #Q = np.fft.fftshift(Q,axes=(1,))                                # put left to center, put center to right
-                #print('Q:',Q.shape,pd.DataFrame(Q))
-                QQ = abs(Q)                                                     # Magnitude of the fft
-                np.fliplr(QQ)
+                vect_rahm = byteBuffer[idX:idX + tlv_length].view(np.int16)     # Data vector of the tlv value
+                cmat_ra = np.array([[vect_rahm[i] + 1j * vect_rahm[i+1] for i in range(0, len(vect_rahm), 2)]])  # Reassembling real and imag values in one complex matrix
+                cmat_ra = np.reshape(cmat_ra,(RANGE_FFT_SIZE,numTxAnt*numRxAnt))
+                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE+1,axis=1)
+                Q = abs(Q)                                                     # Magnitude of the fft
+                Q = np.fft.fftshift(Q,axes=(1,))                               # Cut off first angle bin
+                QQ = Q[:,1:]                             
                 if QQ.shape == (RANGE_FFT_SIZE,DOPPLER_FFT_SIZE):
                     dataOK = 1
                     print('Range Azimuth Heatmap data :\n',QQ,'\n')
@@ -264,7 +260,7 @@ def parseData68xx_AOP(byteBuffer):
             
             else:
                 dataOK = 0
-                print("TLV length does not match expected size for Range Azimuth data, check hard coded number of antennas")
+                print("TLV length does not match expected size for Range Azimuth data:",expected_size,",check hard coded number of antennas")
                 return dataOK, mat, QQ
 
 
@@ -292,7 +288,7 @@ def parseData68xx_AOP(byteBuffer):
                 break
             else:
                 dataOK = 0
-                print("TLV length does not match expected size for Range Doppler data")
+                print("TLV length does not match expected size for Range Doppler data:",resultSize,RANGE_FFT_SIZE,DOPPLER_FFT_SIZE)
                 return dataOK, mat, QQ
         
         # Read the data if TLV type 7 (Side info on Detected points) detected
@@ -304,9 +300,10 @@ def parseData68xx_AOP(byteBuffer):
             pointsinfo_array = np.zeros([int(num_points),2],dtype='uint16')
             pointsinfo_array = vect_pi.reshape(int(num_points),2)
             points_array = np.concatenate((points_array,pointsinfo_array), axis=1)
-            labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
-            points_df = pd.DataFrame(points_array,columns=labels)
-            print("\n",points_df,"\n")
+            if DEBUG:
+                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
+                points_df = pd.DataFrame(points_array,columns=labels)
+                print("\n",points_df,"\n")
 
         idX += tlv_length   # Check next TLV
     return dataOK, mat, QQ

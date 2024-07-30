@@ -46,7 +46,7 @@ def min_max(in_files):
 
 classname = input("Please Input Class Name \n:>")
 #dataset_path = os.getcwd() + "/Dataset/"   #dataset path for raspberry
-dataset_path = os.getcwd() + "\\Dataset\\" + "\\Doppler\\" + classname#dataset path for windows
+dataset_path = os.getcwd() + "\\Dataset\\" + "Doppler\\" + classname            #dataset path for windows
 if DEBUG:
     print('dataset path = ',dataset_path)
 
@@ -67,6 +67,8 @@ if DEBUG:
 # loop over the list of csv files
 count = 0
 plt.ion()
+figure = plt.figure()
+axes = figure.add_subplot()
 for f in (csv_files):
     # read the csv file
     heatmap = readCSV(f)
@@ -74,11 +76,10 @@ for f in (csv_files):
     df = np.divide(aux_n1, max_m - min_m)
     df[0,0] = 0
     df[0,1] = 1
-    plt.imshow(heatmap, cmap='Spectral_r', interpolation='nearest', aspect='auto')
+    axes.imshow(heatmap, cmap='Spectral_r', interpolation='nearest', aspect='auto')
     plt.title(csv_files[count]+'_new')
-    plt.show()
     plt.pause(0.25)
     #energia_calculada = np.sum(np.power(df, 2))     # Calculate energy deployed on each frame
     #print(energia_calculada)  
     count+=1
-
+plt.ioff()

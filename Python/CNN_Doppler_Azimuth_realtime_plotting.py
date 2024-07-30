@@ -15,7 +15,7 @@ from keras import models
 configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x256_3D.cfg'
 
 # CNN 3d model, min and max values
-model_name_dop = os.getcwd() + '\\all_targets_doppler_1045_3598.h5'
+model_name_dop = os.getcwd() + '\\all_targets_doppler_1037_3598.h5'
 min_dop = 1045.0
 max_dop = 3598.0
 
@@ -273,10 +273,11 @@ def parseData68xx(byteBuffer):
                 for n in range (RANGE_FFT_SIZE):                                # Reassembling real and imag values in one complex matrix
                     for m in range(0,numTxAnt*numRxAnt*2,2):
                         cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
-                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE,axis=1)
+                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE+1,axis=1)
                 Q = abs(Q)                                                      # Magnitude of the fft
-                #Q = ²(Q,'Azimuth')
-                inpt_az = Q.reshape(1,
+                Q = np.fft.fftshift(Q,axes=(1,))
+                QQ = Q[:,1:]
+                inpt_az = QQ.reshape(1,
                         RANGE_FFT_SIZE,
                         DOPPLER_FFT_SIZE,
                         1)

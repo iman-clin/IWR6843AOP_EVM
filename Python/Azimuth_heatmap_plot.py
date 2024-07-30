@@ -9,7 +9,7 @@ import glob
 import scipy.interpolate as spi
 
 # Configuration file name
-configFileName = os.getcwd() + '\\config_files\\test.cfg'
+configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x256_3D.cfg'
 
 DEBUG = False
 
@@ -111,7 +111,7 @@ range_res = configParameters["rangeResolutionMeters"]
 plt.ion()
 for f in csv_files:
     a = readCSV(f)
-    a = (a - min_m) / (max_m - min_m)
+    #a = (a - min_m) / (max_m - min_m)
 
     range_bins = a.shape[0]
     angle_bins = a.shape[1]

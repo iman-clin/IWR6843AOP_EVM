@@ -11,7 +11,7 @@ from keras import models
 
 # Configuration file name
 configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x256.cfg'
-powerDownCmd = 'idlePowerCycle -1 1 0 1 0 1 0 0 0 '
+powerDownCmd = 'idlePowerCycle -1 1 0 1 1 1 0 0 0 '
 
 # CNN 3d model, min and max values
 model_name_dop = os.getcwd() + '\\all_targets_doppler_1241_4860.h5'
@@ -34,7 +34,7 @@ DEPTH = 4
 CLIport = {}
 Dataport = {}
 
-maxBufferSize = 2**17
+maxBufferSize = 2**16
 byteBuffer = np.zeros(maxBufferSize, dtype='uint8')
 byteBufferLength = 0
 init = 0
@@ -71,7 +71,7 @@ def serialConfig(CLIportname, Dataportname):
 
 # ------------------------------------------------------------------
 
-# Function to send the configure the radar without reinitializing
+# Function to configure the radar without reinitializing
 
 def sendConfig(configFileName):
     global CLIport, Dataport
@@ -279,10 +279,11 @@ def parseData68xx(byteBuffer):
                 for n in range (RANGE_FFT_SIZE):                                # Reassembling real and imag values in one complex matrix
                     for m in range(0,numTxAnt*numRxAnt*2,2):
                         cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
-                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE,axis=1)
+                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE+1,axis=1)
                 Q = abs(Q)                                                      # Magnitude of the fft
-                inpt_az = norm(Q,'Azimuth')
-                inpt_az = inpt_az.reshape(1,
+                Q = np.fft.fftshift(Q,axes=(1,))
+                QQ = Q[:,1:]
+                inpt_az = QQ.reshape(1,
                         RANGE_FFT_SIZE,
                         DOPPLER_FFT_SIZE,
                         1)
@@ -455,7 +456,7 @@ def main():
                     if DEBUG:
                         print(sleepCmd)
                     CLIport.write(sleepCmd.encode())                    # Sending sleep command
-                    print('Nothing detected, sleeping for',sleeptime/200000+0,5,'s\n')
+                    print('Nothing detected, sleeping for',sleeptime/200000+0.5,'s\n')
                     time.sleep(sleeptime/200000+0.5)                    # Hold execution during sleep time, add 500ms to be sure sensor has time to wake up
                     if DEBUG:
                         print('nap ended')
@@ -470,4 +471,4 @@ def main():
                     break
 
 
-main()                          # Call for main loop
+main()                          # Call for main loopF

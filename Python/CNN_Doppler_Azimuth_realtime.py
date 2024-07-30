@@ -271,10 +271,11 @@ def parseData68xx(byteBuffer):
                 for n in range (RANGE_FFT_SIZE):                                # Reassembling real and imag values in one complex matrix
                     for m in range(0,numTxAnt*numRxAnt*2,2):
                         cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
-                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE,axis=1)
+                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE+1,axis=1)
                 Q = abs(Q)                                                      # Magnitude of the fft
-                #Q = norm(Q,'Azimuth')
-                inpt_az = Q.reshape(1,
+                Q = np.fft.fftshift(Q,axes=(1,))
+                QQ = Q[:,1:]
+                inpt_az = QQ.reshape(1,
                         RANGE_FFT_SIZE,
                         DOPPLER_FFT_SIZE,
                         1)
