@@ -269,11 +269,9 @@ def parseData68xx(byteBuffer):
                 if DEBUG:
                     print("Sizes Matches: ", expected_size)
                 vect_rahm = byteBuffer[idX:idX + tlv_length].view(np.int16)    # Data vector of the tlv value
-                mat_ra_hm = np.reshape(vect_rahm,(RANGE_FFT_SIZE,numRxAnt*numTxAnt*2)) # Data array of the tlv value, real and imag values in 2 separated cells
                 cmat_ra = np.zeros((RANGE_FFT_SIZE,numRxAnt*numTxAnt),complex)
-                for n in range (RANGE_FFT_SIZE):                                # Reassembling real and imag values in one complex matrix
-                    for m in range(0,numTxAnt*numRxAnt*2,2):
-                        cmat_ra[n][m//2] = complex(mat_ra_hm[n][m+1],mat_ra_hm[n][m])
+                cmat_ra = np.array([[vect_rahm[i] + 1j * vect_rahm[i+1] for i in range(0, len(vect_rahm), 2)]])  # Reassembling real and imag values in one complex matrix
+                cmat_ra = np.reshape(cmat_ra,(RANGE_FFT_SIZE,numTxAnt*numRxAnt))
                 Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE+1,axis=1)
                 Q = abs(Q)                                                      # Magnitude of the fft
                 Q = np.fft.fftshift(Q,axes=(1,))
