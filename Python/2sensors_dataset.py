@@ -1,0 +1,771 @@
+# Import libraries
+import os
+from os.path import join, isdir
+import sys
+import serial
+import time
+import datetime
+import glob
+import re
+import random
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Constants
+DEBUG = False               # Debug constants for extra prints
+
+RANGE_FFT_SIZE = 256        # Num range bins
+DOPPLER_FFT_SIZE = 31       # Num azimuth bins - 1
+DEPTH = 4                   # Depth of a CNN sample
+
+# Initialization of Buffer and other useful vars
+CLIport1, CLIport2 = {}, {}
+Dataport1, Dataport2 = {}, {}
+
+maxBufferSize = 2**16
+byteBuffer = np.zeros(maxBufferSize, dtype='uint8')
+byteBufferLength = 0
+
+magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
+
+compteur = 0
+
+# Directory and file names
+workDir = os.getcwd() + '\\2sensors'
+configFileName = workDir + '\\..\\config_files\\config_file_doppler_azimuth_32x256_3D.cfg'
+dataset_path = workDir + "\\Dataset\\"
+
+# Section 1: Data acquisition
+
+def serialConfig(configFileName):
+    # Open the serial ports for the configuration and the data ports
+    # Raspberry pi   /    Windows 
+    try:
+        # next 2 lines for connection on Raspberry
+        #CLIport = serial.Serial('/dev/ttyUSB0', 115200)   
+        #Dataport = serial.Serial('/dev/ttyUSB1', 921600)
+
+        # next 2 lines for connection on Windows
+        CLIport = serial.Serial(input("mmWave Demo input config port (enhanced port) = "), 115200)
+        Dataport = serial.Serial(input("mmWave Demo input data port = "), 921600)
+
+        # Read the configuration file and send it to the board
+        config = [line.rstrip('\r\n') for line in open(configFileName)]
+        for i in config:
+            CLIport.write((i + '\n').encode())
+            if DEBUG:
+                print(i)
+            time.sleep(0.01)
+    
+    # Exception on serial ports opening
+    except serial.SerialException as se:
+        print('Problem Opening Serial Port!! \n Error: ')
+        print(str(se) + '\n')
+        sys.exit()
+
+    return CLIport, Dataport
+
+def parseConfigFile(configFileName):
+    configParameters = {} # Initialize an empty dictionary to store the configuration parameters
+
+    # Read the configuration file to extract config parameters and frame config
+    config = [line.rstrip('\r\n') for line in open(configFileName)]
+    for i in config:
+
+        # Split the line
+        splitWords = i.split(" ")
+
+        # Hard code the number of antennas, change if other configuration is used
+        global numRxAnt, numTxAnt
+        numRxAnt = 4
+        numTxAnt = 2
+
+        # Get the information about the profile configuration
+        if "profileCfg" in splitWords[0]:
+            startFreq = int(float(splitWords[2]))
+            idleTime = int(splitWords[3])
+            rampEndTime = float(splitWords[5])
+            freqSlopeConst = float(splitWords[8])
+            numAdcSamples = int(splitWords[10])
+            numAdcSamplesRoundTo2 = 1
+            while numAdcSamples > numAdcSamplesRoundTo2:
+                numAdcSamplesRoundTo2 *= 2
+            digOutSampleRate = int(splitWords[11])
+
+        # Get the information about the frame configuration 
+        elif "frameCfg" in splitWords[0]:
+            chirpStartIdx = int(splitWords[1])
+            chirpEndIdx = int(splitWords[2])
+            numLoops = int(splitWords[3])
+            numFrames = int(splitWords[4])
+            framePeriodicity = int(splitWords[5])
+
+    # Combine the read data to obtain the configuration parameters
+    numChirpsPerFrame = (chirpEndIdx - chirpStartIdx + 1) * numLoops
+    configParameters["numDopplerBins"] = numChirpsPerFrame / numTxAnt
+    configParameters["numRangeBins"] = numAdcSamplesRoundTo2
+    configParameters["rangeResolutionMeters"] = (3e8 * digOutSampleRate * 1e3) / (2 * freqSlopeConst * 1e12 * numAdcSamples)
+    configParameters["rangeIdxToMeters"] = (3e8 * digOutSampleRate * 1e3) / (2 * freqSlopeConst * 1e12 * configParameters["numRangeBins"])
+    configParameters["dopplerResolutionMps"] = 3e8 / (2 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * configParameters["numDopplerBins"] * numTxAnt)
+    configParameters["maxRange"] = (300 * 0.9 * digOutSampleRate) / (2 * freqSlopeConst * 1e3)
+    configParameters["maxVelocity"] = 3e8 / (4 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * numTxAnt)
+    if DEBUG:
+        print(configParameters)
+
+    return configParameters
+
+# Function to select data type to record and generate file location
+
+def selectType(typeName):
+    typelocation = dataset_path + '\\' + typeName + '\\' + typeName + '_'          #Windows' path to create a non existing file
+    if DEBUG:
+        print('type location = ', typelocation)
+    return(typelocation)
+
+#Function to read a full data Packet, from frame header to last data
+
+def readData(Dataport):
+    global byteBuffer, byteBufferLength
+    byteBuffer = np.zeros(maxBufferSize, dtype='uint8')
+    while True:
+        readBuffer = Dataport.read(Dataport.in_waiting)
+        byteVec = np.frombuffer(readBuffer, dtype='uint8')
+        byteCount = len(byteVec)
+
+        # Check that the buffer is not full, and then add the data to the buffer
+        if (byteBufferLength + byteCount) < maxBufferSize:
+            byteBuffer[byteBufferLength:byteBufferLength + byteCount] = byteVec[:byteCount]
+            byteBufferLength += byteCount
+
+        # Check that the buffer has sufficient amount of data
+        if byteBufferLength > 2**14:
+
+             # Check for all possible locations of the magic word
+            possibleLocs = np.where(byteBuffer == magicWord[0])[0]
+
+            # Confirm that is the beginning of the magic word and store the index in startIdx
+            startIdx = []
+            for loc in possibleLocs:
+                check = byteBuffer[loc:loc + 8]
+                if np.all(check == magicWord):
+                    startIdx.append(loc)
+
+            # Check that startIdx is not empty
+            if startIdx:
+
+                # Remove the data before the first start index
+                if startIdx[0] > 0 and startIdx[0] < byteBufferLength:
+                    byteBuffer[:byteBufferLength - startIdx[0]] = byteBuffer[startIdx[0]:byteBufferLength]
+                    byteBuffer[byteBufferLength - startIdx[0]:] = np.zeros(len(byteBuffer[byteBufferLength - startIdx[0]:]), dtype='uint8')
+                    byteBufferLength = byteBufferLength - startIdx[0]
+
+                # Check that there are no errors with the byte buffer length  
+                if byteBufferLength < 0:
+                    byteBufferLength = 0
+                
+                word = [1, 2**8, 2**16, 2**24]                              # word array to convert 4 bytes to a 32 bit number
+                totalPacketLen = np.matmul(byteBuffer[12:12 + 4], word)     # Read the total packet length
+                
+                # Check that the whole packet has been read
+                if (byteBufferLength >= totalPacketLen) and (byteBufferLength != 0):
+                    break
+    return byteBuffer
+
+# Function to parse Data from the sensor that will be used to build the training dataset
+
+def parseData68xx(byteBuffer):
+    global compteur
+
+    mat_dop = np.zeros((DOPPLER_FFT_SIZE, RANGE_FFT_SIZE), dtype=np.float32)
+    mat_az = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE), dtype=np.float32)
+    res = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE + 1), dtype=np.uint16)
+    dataOK = 0
+    word = [1, 2**8, 2**16, 2**24]                                          # word array to convert 4 bytes to a 32 bit number
+    
+    idX = 0                                                                 # Initialize the pointer index
+    magicNumber = byteBuffer[idX:idX + 8]                                   # Read the header
+    idX += 8
+    version = format(np.matmul(byteBuffer[idX:idX + 4], word), 'x')
+    idX += 4
+    totalPacketLen = np.matmul(byteBuffer[idX:idX + 4], word)
+    idX += 4
+    platform = format(np.matmul(byteBuffer[idX:idX + 4], word), 'x')
+    idX += 4
+    frameNumber = np.matmul(byteBuffer[idX:idX + 4], word)
+    idX += 4
+    timeCpuCycles = np.matmul(byteBuffer[idX:idX + 4], word)
+    idX += 4
+    numDetectedObj = np.matmul(byteBuffer[idX:idX + 4], word)
+    idX += 4
+    numTLVs = np.matmul(byteBuffer[idX:idX + 4], word)
+    idX += 4
+    subFrameNumber = np.matmul(byteBuffer[idX:idX + 4], word)
+    idX += 4
+    
+    compteur += 1
+    if DEBUG:
+        print("sample #",compteur)
+        print('numTLVs :',numTLVs)
+    # Read the TLV messages
+    for tlvIdx in range(numTLVs):
+        # Check the header of the TLV message to find type and length of it
+        tlv_type = np.matmul(byteBuffer[idX:idX + 4], word)
+        idX += 4
+        if DEBUG:
+            print('tlv type :', tlv_type)
+        tlv_length = np.matmul(byteBuffer[idX:idX + 4], word)
+        idX += 4
+        if DEBUG:
+            print('tlv length :', tlv_length)
+
+        # Read the data if TLV type 1 (Detected points) detected
+        if tlv_type == 1:
+            num_points = tlv_length/16
+            if DEBUG:
+                print(num_points,"points detected")
+            vect = byteBuffer[idX:idX + tlv_length].view(np.uint32)     # Data vector
+            points_array = np.zeros([int(num_points),4],dtype='uint32')
+            points_array = vect.reshape(int(num_points),4)
+            if DEBUG:
+                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
+                points_df = pd.DataFrame(points_array,columns=labels)
+                print(points_df)
+
+        # Read the data if TLV type 4 (Range Azimuth Heatmap) detected
+        if tlv_type == 4:
+            expected_size = RANGE_FFT_SIZE * numTxAnt * numRxAnt * np.dtype(np.int16).itemsize * 2    # Expected TLV size : numRangebins * numVirtualAntennas * 2 bytes * 2 (Real + Imag values)
+            if tlv_length == expected_size:
+                if DEBUG:
+                    print("Sizes Matches: ", expected_size)
+                
+                vect_rahm = byteBuffer[idX:idX + tlv_length].view(np.int16)     # Data vector of the tlv value
+                cmat_ra = np.array([[vect_rahm[i] + 1j * vect_rahm[i+1] for i in range(0, len(vect_rahm), 2)]])  # Reassembling real and imag values in one complex matrix
+                cmat_ra = np.reshape(cmat_ra,(RANGE_FFT_SIZE,numTxAnt*numRxAnt))
+                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE+1,axis=1)
+                Q = abs(Q)                                                     # Magnitude of the fft
+                Q = np.fft.fftshift(Q,axes=(1,))                               # Cut off first angle bin
+                mat_az = Q[:,1:]                                                                     # Magnitude of the fft
+                if mat_az.shape == (RANGE_FFT_SIZE,DOPPLER_FFT_SIZE):
+                    dataOK = 1
+                    if DEBUG == True:
+                        print('Range Azimuth Heatmap data :',mat_az,'\n')
+                else:
+                    dataOK = 0
+                    print('Invalid Range Azimuth Matrix')
+                    return dataOK
+            
+            else:
+                dataOK = 0
+                print("TLV length does not match expected size for Range Azimuth data, check hard coded number of antennas")
+                return dataOK
+
+        # Read the data if TLV type 5 (Doppler heatmap) detected
+        if tlv_type == 5:
+            resultSize = RANGE_FFT_SIZE * (DOPPLER_FFT_SIZE+1) * np.dtype(np.uint16).itemsize
+            if tlv_length == resultSize:
+                if DEBUG:
+                    print("Sizes Matches: ", resultSize)
+                
+                ares = byteBuffer[idX:idX + resultSize].view(np.uint16) # Data vector
+                res = np.reshape(ares, res.shape)                       # Data array of the right size
+                # Shift the data to the correct position
+                rest = np.fft.fftshift(res, axes=(1,))      # put left to center, put center to right
+                # Transpose the input data for better visualization
+                result = np.transpose(rest)
+                # Remove DC value from matrix
+                mat_dop = result[1:, :]
+                if mat_dop.shape == (DOPPLER_FFT_SIZE, RANGE_FFT_SIZE):
+                    dataOK = 1
+                    if DEBUG:
+                        print('Range Doppler Heatmap data :',mat_dop, '\n')
+                else:
+                    dataOK = 0
+                    print("Invalid Matrix")
+                    return dataOK, mat_dop, mat_az
+                break
+        
+        # Read the data if TLV type 7 (Side info on Detected points) detected
+        if tlv_type == 7:
+            num_points = tlv_length/4
+            if DEBUG:
+                print(num_points,"points detected")
+            vect_pi = byteBuffer[idX:idX + tlv_length].view(np.uint16)     # Data vector
+            pointsinfo_array = np.zeros([int(num_points),2],dtype='uint16')
+            pointsinfo_array = vect_pi.reshape(int(num_points),2)
+            points_array = np.concatenate((points_array,pointsinfo_array), axis=1)
+            labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
+            points_df = pd.DataFrame(points_array,columns=labels)
+            if DEBUG:
+                print("\n",points_df,"\n")
+
+        idX += tlv_length   # Check next TLV
+    return dataOK, mat_dop, mat_az
+
+# Function to recover the useful data of a frame
+
+def update(Dataport):
+    # Read and parse the received data
+    PacketBuffer = readData(Dataport)               # Read a frame and store it in the packet Buffer
+    dataOK, dop_hm, az_hm = parseData68xx(PacketBuffer)  # Parse Data in the packet Buffer, return range doppler heatmap data
+    return dataOK, dop_hm, az_hm
+
+# Function to save the data in a csv file
+
+def saveM(matf,n,type,num):
+    global classe
+    count = 0
+    if matf.shape[0] == n * num:
+        for m in range(0, n * num, n):
+            if count == 0:
+                tm = datetime.datetime.now()
+                name = f"{tm.year}_{tm.month}_{tm.day}_{tm.hour}_{tm.minute}_{tm.second}"
+            f = open(dataset_path + type + '\\' + classe + '\\' + classe + "_" + name + "_" + str(count) + '.csv', 'w')
+            np.savetxt(f, matf[m:m + n], fmt='%d', delimiter=' ')
+            count += 1
+            f.close()
+    else:
+        print("Incorrect Size\n")
+        print(matf.shape[0])
+        CLIport1.write(('sensorStop\n').encode())
+        CLIport1.close()
+        Dataport1.close()
+        CLIport2.write(('sensorStop\n').encode())
+        CLIport2.close()
+        Dataport2.close()
+        sys.exit()
+
+# Function to get a full class for num samples
+
+def classAcquisition(class_name,num):
+    global compteur, classe
+    classe = class_name
+    matf_dop = np.zeros((DOPPLER_FFT_SIZE * num, RANGE_FFT_SIZE), dtype=np.float32)
+    matf_az = np.zeros((RANGE_FFT_SIZE * num, DOPPLER_FFT_SIZE), dtype=np.float32)
+    count = 0
+    pos_dop = 0
+    pos_az = 0
+    compteur = 0
+
+    while True:
+        try:
+            # Update the data and check if the data is okay
+            dataOk1, hm_dop1, hm_az1 = update(Dataport1)        # Recover data from 1st sensor
+            if DEBUG and dataOk1:
+                print('Data sample acquired from 1st sensor')
+            dataOk2, hm_dop2, hm_az2 = update(Dataport2)        # Recover data from 2nd sensor
+            if DEBUG and dataOk2:
+                print('Data sample acquired from 2nd sensor')
+            dataOk = dataOk1 + dataOk2                          # Add results before saving
+            hm_dop = hm_dop1 + hm_dop2
+            hm_az = hm_az1 + hm_az2
+            #hm_dop = np.concatenate((hm_dop1,hm_dop2))
+            #hm_az = np.concatenate((hm_az1,hm_az2),axes=1)
+            if DEBUG:
+                print('Date of sample :', datetime.datetime.now())
+            if dataOk > 1:
+                if count != 0:
+                    matf_dop[pos_dop:pos_dop + DOPPLER_FFT_SIZE] = hm_dop
+                    pos_dop += DOPPLER_FFT_SIZE
+                    matf_az[pos_az:pos_az + RANGE_FFT_SIZE] = hm_az
+                    pos_az += RANGE_FFT_SIZE
+                    print('Sample',count,'out of',num,'acquired')
+                count += 1
+                if count == (num + 1):
+                    if class_name == 'idle':
+                        saveM(matf_dop, DOPPLER_FFT_SIZE, 'Doppler',num)
+                        saveM(matf_az, RANGE_FFT_SIZE, 'Azimuth',num)
+                    elif class_name == 'presence':
+                        saveM(matf_dop, DOPPLER_FFT_SIZE, 'Doppler',num)
+                    elif class_name == 'object_moved':
+                        saveM(matf_az, RANGE_FFT_SIZE, 'Azimuth',num)
+                    else:
+                        print('Invalid class selected for data saving')
+                        CLIport1.write(('sensorStop\n').encode())
+                        CLIport1.close()
+                        Dataport1.close()
+                        CLIport2.write(('sensorStop\n').encode())
+                        CLIport2.close()
+                        Dataport2.close()
+                    break
+        # Stop the program and close everything if Ctrl + c is pressed
+        except KeyboardInterrupt:
+            CLIport1.write(('sensorStop\n').encode())
+            CLIport1.close()
+            Dataport1.close()
+            CLIport2.write(('sensorStop\n').encode())
+            CLIport2.close()
+            Dataport2.close()
+            break
+
+
+
+
+n_class = 360 # number of samples for each class, note: acquisition time = n_class*0.5 seconds
+
+print("Serial connection, make sure the sensors are connected to PC")
+
+# Configure the serial ports for 1st sensor
+CLIport1, Dataport1 = serialConfig(configFileName)
+print("Connection to 1st sensor established succesfuly")
+
+# Configure the serial ports for 2nd sensor
+CLIport2, Dataport2 = serialConfig(configFileName)
+print("Connection to 2nd sensor established succesfuly")
+
+# Get the configuration parameters from the configuration file
+configParameters = parseConfigFile(configFileName)
+
+# Class acquisition routine
+print("Prepare for data acquisition :")
+if (input("Idle calibration, please remove every moving object from the sensor field of view, press enter when ready, type skip if dataset already acquired:") != 'skip'):
+    time.sleep(5)
+    classAcquisition("idle",n_class)
+
+    input("Presence calibration, please move in front of the sensor field of view and keep moving in front of it at different speeds during the calibration, press enter when ready :")
+    time.sleep(5)
+    classAcquisition("presence",n_class)
+
+    input("Object moved calibration, please add a static object to the room and step aside the sensor field of view, press enter when ready :")
+    for i in range (1,11):
+        time.sleep(5)
+        print("Acquisition",i,"out of 10:")
+        classAcquisition("object_moved",n_class//10)
+        if i<10:
+            input("Please move the static object to another point inside the sensor field of view and step aside, press enter when ready :")
+
+
+
+# Section 2: Preparing training dataset
+
+# Create a dictionnary for each input type, store them in a list
+type_list = [name for name in os.listdir(dataset_path) if isdir(join(dataset_path, name))]
+
+i = 0
+
+# Gather the class list for each type of data, keep all that in a dictionnary
+for type in type_list:
+    type_dict = {}
+    type_dict["type input"] = type
+    class_list = [name for name in os.listdir(join(dataset_path,type)) if isdir(join(dataset_path, type))]
+    type_dict["classes"] = class_list
+    print(type_dict)
+    type_list[i] = type_dict
+    i += 1
+
+# See how many files are in each
+num_samples=0
+for type in type_list:
+        for target in type["classes"]:
+                num_samples += len(os.listdir(join(dataset_path, type["type input"], target)))
+
+# Settings
+perc_keep_samples = 1.0 # 1.0 is keep all samples
+val_ratio = 0.15
+test_ratio = 0.15 
+
+# Return float from csv file
+def atof(text):
+    try:
+        retval = float(text)
+    except ValueError:
+        retval = text
+    return retval
+
+# Split the initial string in separated float substrings
+def natural_keys(text):
+    return [ atof(c) for c in re.split(r'[+-]?([0-9]+(?:[.][0-9]*)?|[.][0-9]+)', text) ]
+
+# Initialize vars
+filenames_dict = {}
+y_dict = {}
+
+# Create filenames dictionnary and the corresponding class dictionnary for each data type
+for type in type_list:
+    files = []
+    y = []
+
+    if type["type input"] == 'Doppler':
+        filenames = []
+        # Keep only a depth multiple number of files to analyze for 3D CNN
+        for index, target in enumerate(type["classes"]):
+            idx = []
+            i_f = [[],[]]
+            fln = [[],[]]
+            files = glob.glob(dataset_path + type["type input"] + "\\" + target + "/*.csv")
+            x = len(files)
+            if (x % DEPTH) != 0:
+                dif = x % DEPTH
+                files = files[:x-dif] 
+
+            dat = ""
+            fc = 0
+            for i, f in enumerate(files):
+                #print('i:',i,',f:',f)
+                if i == 0:
+                    dat = f.split('_')[-7] + f.split('_')[-6] + f.split('_')[-5] + f.split('_')[-4] + f.split('_')[-3]
+                    fln[fc].append(f)
+                    fl = f.split('_')[-1]
+                    i_f[fc].append(int(fl.split('.')[0]))
+                else:
+                    if dat == (f.split('_')[-7] + f.split('_')[-6] + f.split('_')[-5] + f.split('_')[-4] + f.split('_')[-3]):
+                        fln[fc].append(f)
+                        fl = f.split('_')[-1]
+                        i_f[fc].append(int(fl.split('.')[0]))
+                    else:
+                        fc += 1
+                        dat = f.split('_')[-7] + f.split('_')[-6] + f.split('_')[-5] + f.split('_')[-4] + f.split('_')[-3]
+                        fln[fc].append(f)
+                        fl = f.split('_')[-1]
+                        i_f[fc].append(int(fl.split('.')[0]))
+
+            for x in i_f:
+                idx.append(np.argsort(np.array(x)))
+
+
+            for w, z in enumerate(idx):
+                for i in range(0, len(z)-3):
+                    if len(z) > 4:
+                        aux = []
+                        aux.append(fln[w][z[i]])
+                        aux.append(fln[w][z[i+1]])
+                        aux.append(fln[w][z[i+2]])
+                        aux.append(fln[w][z[i+3]])
+                        filenames.append(aux)
+                        y.append(index)
+
+    else:
+    # Keep all files for 2D CNN
+        filenames = []
+        for index, target in enumerate(type["classes"]):
+            idx = []
+            i_f = [[],[]]
+            fln = [[],[]]
+            files = glob.glob(dataset_path + type["type input"] + "\\" + target + "/*.csv")
+            for i, f in enumerate(files):
+                y.append(index)
+            filenames+=files
+
+    y_dict[type['type input']] = y
+    filenames_dict[type['type input']] = filenames
+    if DEBUG:
+        print('N for type',type['type input'],":",len(filenames),filenames)
+        print('filenames:',filenames_dict[type['type input']])
+        print("y:",y)
+
+# Associate filename with true output, add if more input types
+filenames_y_doppler = list(zip(filenames_dict['Doppler'], y_dict['Doppler']))
+filenames_y_azimuth = list(zip(filenames_dict['Azimuth'],y_dict['Azimuth']))
+
+# Shuffle
+random.shuffle(filenames_y_doppler)
+random.shuffle(filenames_y_azimuth)
+
+# Extract shuffled lists
+filenames_doppler, y_doppler = zip(*filenames_y_doppler)
+filenames_azimuth, y_azimuth = zip(*filenames_y_azimuth)
+
+# Only keep the specified number of samples (shorter extraction / training)
+filenames_doppler = filenames_doppler[:int(len(filenames_doppler) * perc_keep_samples)]
+filenames_azimuth = filenames_azimuth[:int(len(filenames_azimuth) * perc_keep_samples)]
+if DEBUG:
+    print('Number of samples kept for Doppler:',len(filenames_doppler))
+    print('Number of samples kept for Azimuth:',len(filenames_azimuth))
+    print('Total number of samples:',len(filenames_doppler)+len(filenames_azimuth))
+
+# Calculate validation and test set sizes
+val_set_size_dop = int(len(filenames_doppler) * val_ratio)
+val_set_size_az = int(len(filenames_azimuth) * val_ratio)
+test_set_size_dop = int(len(filenames_doppler) * test_ratio)
+test_set_size_az = int(len(filenames_azimuth) * test_ratio)
+
+# Create filename list for each type
+for type in type_list:
+    if type['type input'] == 'Azimuth':
+        filenam_az = []
+        z_az = []
+        for index, target in enumerate(type['classes']):
+            filenam_az.append(os.listdir(join(dataset_path,type['type input'],target)))
+            z_az.append(np.ones(len(filenam_az[index])) * index)
+        filenam_az = [item for sublist in filenam_az for item in sublist]
+        z_az = [item for sublist in z_az for item in sublist]
+    if type['type input'] == 'Doppler':
+        filenam_dop = []
+        z_dop = []
+        for index, target in enumerate(type['classes']):
+            filenam_dop.append(os.listdir(join(dataset_path,type['type input'],target)))
+            z_dop.append(np.ones(len(filenam_dop[index])) * index)
+        filenam_dop = [item for sublist in filenam_dop for item in sublist]
+        z_dop = [item for sublist in z_dop for item in sublist]
+
+# Readcsv function that returns the data 
+def readCSV(filename):
+    data = np.loadtxt(filename, dtype = np.float32, delimiter=' ')
+    return data
+
+# MIN-MAX Function for dataset preparation
+def min_max_prep(in_files, in_z, type):
+    # Numpy arrays to store train, test and val matrix
+    min = 5000
+    max = 0
+    count = 0
+    
+    for index, filename in enumerate(in_files):
+        class_list = type['classes']
+        # Create path from given filename and target item
+        path = join(dataset_path, type['type input'], class_list[int(in_z[index])],filename)
+        
+        # Check to make sure weŕe reading a .wav file
+        if not path.endswith('.csv'):
+            continue
+        
+
+        heatmap = readCSV(path)
+        
+        min = np.minimum(min, np.min(heatmap))
+        max = np.maximum(max, np.max(heatmap))
+        count += 1
+        
+    print("Count: " + str(count))
+    print("MIN: " + str(min) + "\tMAX: " + str(max))
+            
+    return min, max
+
+min_az, max_az = min_max_prep(filenam_az, z_az, type_list[0])
+min_dop, max_dop = min_max_prep(filenam_dop, z_dop, type_list[1])
+
+# Break dataset apart into train, validation, and test sets
+filenames_val_az = filenames_azimuth[:val_set_size_az]
+filenames_test_az = filenames_azimuth[val_set_size_az:(val_set_size_az + test_set_size_az)]
+filenames_train_az = filenames_azimuth[(val_set_size_az + test_set_size_az):]
+
+filenames_val_dop = filenames_doppler[:val_set_size_dop]
+filenames_test_dop = filenames_doppler[val_set_size_dop:(val_set_size_dop + test_set_size_dop)]
+filenames_train_dop = filenames_doppler[(val_set_size_dop + test_set_size_dop):]
+
+# Break y apart into train, validation, and test sets
+y_orig_val_az = y_azimuth[:val_set_size_az]
+y_orig_test_az = y_azimuth[val_set_size_az:(val_set_size_az + test_set_size_az)]
+y_orig_train_az = y_azimuth[(val_set_size_az + test_set_size_az):]
+
+y_orig_val_dop = y_doppler[:val_set_size_dop]
+y_orig_test_dop = y_doppler[val_set_size_dop:(val_set_size_dop + test_set_size_dop)]
+y_orig_train_dop = y_doppler[(val_set_size_dop + test_set_size_dop):]
+
+#print(type_list)
+dop_hm = readCSV(join(dataset_path, 'Doppler',type_list[1]['classes'][int(y_orig_train_dop[0])],filenames_train_dop[0][0]))
+NUMBER_ROWS_DOP, NUMBER_COLUMNS_DOP = dop_hm.shape
+
+az_hm = readCSV(join(dataset_path, 'Azimuth',type_list[0]['classes'][int(y_orig_train_az[0])],filenames_train_az[0]))
+NUMBER_ROWS_AZ, NUMBER_COLUMNS_AZ = az_hm.shape
+
+def build_dataset(in_files, in_y, type):
+    if (type['type input']=='Doppler'):
+        # Numpy arrays to store train, test and val matrix
+        global min_dop
+        global max_dop
+
+        num = len(in_files) * (NUMBER_ROWS_DOP)
+        out_x = np.zeros((num, NUMBER_COLUMNS_DOP, DEPTH), dtype = np.float32)
+        out_y = []
+        
+        for index, filename in enumerate(in_files):
+
+            # Create path from given filename and target item
+            class_list = type['classes']
+            # Create path from given filename and target item
+            path = join(dataset_path, type['type input'], class_list[int(in_y[index])],filename[0])
+            path1 = join(dataset_path, type['type input'], class_list[int(in_y[index])],filename[0])
+            path2 = join(dataset_path, type['type input'], class_list[int(in_y[index])],filename[0])
+            path3 = join(dataset_path, type['type input'], class_list[int(in_y[index])],filename[0])
+            
+            # Check to make sure weŕe reading a .csv file
+            if not path.endswith('.csv'):
+                continue
+            heatmap = readCSV(path)
+            aux_n1 = np.subtract(heatmap, min_dop)
+            aux_n2 = np.divide(aux_n1, (max_dop - min_dop))
+
+            out_x[index*(NUMBER_ROWS_DOP):index*(NUMBER_ROWS_DOP)+NUMBER_ROWS_DOP, : , 0] = aux_n2
+            
+            out_y.append(in_y[index])
+
+            heatmap = readCSV(path1)
+            aux_n1 = np.subtract(heatmap, min_dop)
+            aux_n2 = np.divide(aux_n1, (max_dop - min_dop))
+
+            out_x[index*(NUMBER_ROWS_DOP):index*(NUMBER_ROWS_DOP)+NUMBER_ROWS_DOP, : , 1] = aux_n2
+                
+
+            heatmap = readCSV(path2)
+            aux_n1 = np.subtract(heatmap, min_dop)
+            aux_n2 = np.divide(aux_n1, (max_dop - min_dop))
+
+            out_x[index*(NUMBER_ROWS_DOP):index*(NUMBER_ROWS_DOP)+NUMBER_ROWS_DOP, : , 2] = aux_n2
+            
+
+            heatmap = readCSV(path3)
+            aux_n1 = np.subtract(heatmap, min_dop)
+            aux_n2 = np.divide(aux_n1, (max_dop - min_dop))
+
+            out_x[index*(NUMBER_ROWS_DOP):index*(NUMBER_ROWS_DOP)+NUMBER_ROWS_DOP, : , 3] = aux_n2
+    else:
+        # Numpy arrays to store train, test and val matrix
+        global min_az
+        global max_az
+
+        num = len(in_files) * (NUMBER_ROWS_AZ)
+        out_x = np.zeros((num, NUMBER_COLUMNS_AZ), dtype = np.float32)
+        out_y = []
+        
+        for index, filename in enumerate(in_files):
+            
+            # Create path from given filename and target item
+            class_list = type['classes']
+            # Create path from given filename and target item
+            path = filename
+            # Check to make sure were reading a .csv file
+            if not path.endswith('.csv'):
+                continue
+            
+            heatmap = readCSV(path)
+            
+            # Data normalization
+            #aux_n1 = np.subtract(heatmap, min_az)
+            #aux_n2 = np.divide(aux_n1, (max_az - min_az))
+
+            out_x[index*(NUMBER_ROWS_AZ):index*(NUMBER_ROWS_AZ)+NUMBER_ROWS_AZ, :] = heatmap
+            
+            out_y.append(in_y[index])
+    
+    return out_x, out_y
+
+
+# Create train, validation, and test sets
+x_train_dop, y_train_dop=build_dataset(filenames_train_dop, y_orig_train_dop, type_list[1])
+x_val_dop, y_val_dop=build_dataset(filenames_val_dop, y_orig_val_dop,type_list[1])
+x_test_dop, y_test_dop=build_dataset(filenames_test_dop, y_orig_test_dop,type_list[1])
+
+x_train_az, y_train_az=build_dataset(filenames_train_az, y_orig_train_az, type_list[0])
+x_val_az, y_val_az=build_dataset(filenames_val_az, y_orig_val_az,type_list[0])
+x_test_az, y_test_az=build_dataset(filenames_test_az, y_orig_test_az,type_list[0])
+
+# Save features and truth vector (y) sets to disk
+feature_sets_file_dop='2sensors\\Features\\all_targets_doppler_' + str(int(min_dop)) + '_' + str(int(max_dop)) + '.npz'
+np.savez(feature_sets_file_dop,
+        x_train=x_train_dop,
+        y_train=y_train_dop,
+        x_val=x_val_dop,
+        y_val=y_val_dop,
+        x_test=x_test_dop,
+        y_test=y_test_dop)
+
+feature_sets_file_az='2sensors\\Features\\all_targets_azimuth_' + str(int(min_az)) + '_' + str(int(max_az)) + '.npz'
+np.savez(feature_sets_file_az,
+        x_train=x_train_az,
+        y_train=y_train_az,
+        x_val=x_val_az,
+        y_val=y_val_az,
+        x_test=x_test_az,
+        y_test=y_test_az)
