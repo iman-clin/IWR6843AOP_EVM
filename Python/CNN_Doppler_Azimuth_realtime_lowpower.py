@@ -10,24 +10,24 @@ from PIL import ImageTk, Image
 from keras import models
 
 # Configuration file name
-configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x256.cfg'
-powerDownCmd = 'idlePowerCycle -1 1 0 1 1 1 0 0 0 '
+configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x256_3D.cfg'
+powerDownCmd = 'idlePowerCycle -1 1 0 1 1 1 0 0 0 ' # CLI command for Idle activation
 
-# CNN 3d model, min and max values
-model_name_dop = os.getcwd() + '\\all_targets_doppler_1241_4860.h5'
-min_dop = 1241.0
-max_dop = 4860.0
+# CNN 3D model, min and max values
+model_name_dop = os.getcwd() + '\\all_targets_doppler_1045_3598.h5'
+min_dop = 1045.0
+max_dop = 3598.0
 
 # CNN 2D model, min and max values
-model_name_az = os.getcwd() + '\\all_targets_azimuth_0_32185.h5'
+model_name_az = os.getcwd() + '\\all_targets_azimuth_0_10922.h5'
 min_az = 0
-max_az = 32185
+max_az = 10922
 
-THRESHOLD = 0.85                                # Threshold for idle probabilities
+THRESHOLD = 0.85                                    # Threshold for idle probabilities
 
 # Number of rows and columns for heatmap samples
-NUMBER_ROWS_DOP = 31
-NUMBER_COlUMNS_DOP = 256
+DOPPLER_FFT_SIZE = 31
+RANGE_FFT_SIZE = 256
 DEPTH = 4
 
 # Buffer and useful vars
@@ -44,11 +44,11 @@ magicWord = [2, 1, 4, 3, 6, 5, 8, 7]
 
 ObjectsData = 0
 
-DEBUG = False
+DEBUG = True
 
 # ------------------------------------------------------------------
 
-# Function to configure the serial ports and send the data from the configuration file to the radar
+# Function to configure the serial ports 
 
 def serialConfig(CLIportname, Dataportname):
     # Open the serial ports for the configuration and the data ports
@@ -71,7 +71,7 @@ def serialConfig(CLIportname, Dataportname):
 
 # ------------------------------------------------------------------
 
-# Function to configure the radar without reinitializing
+# Function to configure the radar from the config file
 
 def sendConfig(configFileName):
     global CLIport, Dataport
@@ -131,8 +131,6 @@ def parseConfigFile(configFileName):
     configParameters["dopplerResolutionMps"] = 3e8 / (2 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * configParameters["numDopplerBins"] * numTxAnt)
     configParameters["maxRange"] = (300 * 0.9 * digOutSampleRate) / (2 * freqSlopeConst * 1e3)
     configParameters["maxVelocity"] = 3e8 / (4 * startFreq * 1e9 * (idleTime + rampEndTime) * 1e-6 * numTxAnt)
-    RANGE_FFT_SIZE = int(configParameters["numRangeBins"])
-    DOPPLER_FFT_SIZE = int(configParameters["numDopplerBins"] - 1)
     if DEBUG:
         print(configParameters)
 
@@ -147,8 +145,8 @@ def norm(mat,type):
     if type == 'Doppler':
         aux_n1 = np.subtract(mat, min_dop)
         aux_n2 = np.divide(aux_n1, (max_dop - min_dop))
-        norm_mat = aux_n2.reshape(NUMBER_ROWS_DOP,
-                                NUMBER_COlUMNS_DOP)
+        norm_mat = aux_n2.reshape(DOPPLER_FFT_SIZE,
+                                RANGE_FFT_SIZE)
         return(norm_mat)
     if type == 'Azimuth':
         aux_n1 = np.subtract(mat, min_az)
@@ -262,14 +260,16 @@ def parseData68xx(byteBuffer):
             vect = byteBuffer[idX:idX + tlv_length].view(np.uint32)     # Data vector
             points_array = np.zeros([int(num_points),4],dtype='uint32')
             points_array = vect.reshape(int(num_points),4)
-            if DEBUG:
-                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
-                points_df = pd.DataFrame(points_array,columns=labels)
-                print(points_df)
+            #if DEBUG:                                                   # Uncomment if no TLV type 7
+            #    labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
+            #    points_df = pd.DataFrame(points_array,columns=labels)
+            #    print(points_df)
 
         # Read the data if TLV type 4 (Range Azimuth Heatmap) detected
         if tlv_type == 4:
-            expected_size = RANGE_FFT_SIZE * numTxAnt * numRxAnt * np.dtype(np.int16).itemsize * 2    # Expected TLV size : numRangebins * numVirtualAntennas * 2 bytes * 2 (Real + Imag values)
+            expected_size = RANGE_FFT_SIZE * numTxAnt * numRxAnt * np.dtype(np.int16).itemsize * 2    # Expected TLV size : numRangebins * numAzimuthVirtualAntennas * 2 bytes * 2 (Real + Imag values)
+            if DEBUG:
+                print('expected size for tlv type 4 :',expected_size)
             if tlv_length == expected_size:
                 if DEBUG:
                     print("Sizes Matches: ", expected_size)
@@ -304,12 +304,12 @@ def parseData68xx(byteBuffer):
         # Read the data if TLV type 5 (Doppler heatmap) detected
         if tlv_type == 5:
             compteur += 1
-            resultSize = NUMBER_COlUMNS_DOP * (NUMBER_ROWS_DOP + 1) * np.dtype(np.uint16).itemsize
+            resultSize = RANGE_FFT_SIZE * (DOPPLER_FFT_SIZE + 1) * np.dtype(np.uint16).itemsize
             if tlv_length == resultSize:
                 if DEBUG:
                     print("Sizes Matches: ", resultSize)
-                    print("\nRange Bins: ", NUMBER_COlUMNS_DOP)
-                    print("\nDoppler Bins: ", NUMBER_ROWS_DOP + 1)
+                    print("\nRange Bins: ", RANGE_FFT_SIZE)
+                    print("\nDoppler Bins: ", DOPPLER_FFT_SIZE + 1)
                 
                 ares = byteBuffer[idX:idX + resultSize].view(np.uint16) # Data vector
                 res = np.reshape(ares, res.shape)                       # Data array of the right size
@@ -319,7 +319,7 @@ def parseData68xx(byteBuffer):
                 result = np.transpose(rest)
                 # Normalize the data
                 mat = norm(result[1:],'Doppler')
-                if mat.shape == (NUMBER_ROWS_DOP, NUMBER_COlUMNS_DOP):
+                if mat.shape == (DOPPLER_FFT_SIZE, RANGE_FFT_SIZE):
                     if init < 4:
                         inpt_dop[:, : , : , init, 0] = mat
                         init += 1
@@ -333,7 +333,7 @@ def parseData68xx(byteBuffer):
 
                 # Remove DC value from matrix
                 mat = result[1:, :]
-                if mat.shape == (NUMBER_ROWS_DOP, NUMBER_COlUMNS_DOP):
+                if mat.shape == (DOPPLER_FFT_SIZE, RANGE_FFT_SIZE):
                     dataOK = 1
                     if DEBUG == True:
                         print('Range Doppler heatmap data:\n',mat,'\n')
@@ -352,9 +352,10 @@ def parseData68xx(byteBuffer):
             pointsinfo_array = np.zeros([int(num_points),2],dtype='uint16')
             pointsinfo_array = vect_pi.reshape(int(num_points),2)
             points_array = np.concatenate((points_array,pointsinfo_array), axis=1)
-            labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
-            points_df = pd.DataFrame(points_array,columns=labels)
-            print(points_df,'\n')
+            if DEBUG:
+                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
+                points_df = pd.DataFrame(points_array,columns=labels)
+                print(points_df,'\n')
 
         if (tlv_type not in (1, 4, 5, 7)):
             dataOK = 0
@@ -420,9 +421,9 @@ sendConfig(configFileName)
 configParameters = parseConfigFile(configFileName)
 
 # Initialize the arrays
-mat = np.zeros((NUMBER_ROWS_DOP, NUMBER_COlUMNS_DOP), dtype = np.float32)
-res = np.zeros((NUMBER_COlUMNS_DOP, NUMBER_ROWS_DOP+1), dtype = np.uint16)
-inpt_dop = np.zeros((1, NUMBER_ROWS_DOP, NUMBER_COlUMNS_DOP, DEPTH, 1), dtype = np.float32)   # Input sample for the CNN
+mat = np.zeros((DOPPLER_FFT_SIZE, RANGE_FFT_SIZE), dtype = np.float32)
+res = np.zeros((RANGE_FFT_SIZE, DOPPLER_FFT_SIZE+1), dtype = np.uint16)
+inpt_dop = np.zeros((1, DOPPLER_FFT_SIZE, RANGE_FFT_SIZE, DEPTH, 1), dtype = np.float32)   # Input sample for the CNN
 
 inpt_az = np.zeros((1,RANGE_FFT_SIZE, DOPPLER_FFT_SIZE,1), dtype = np.float32)   # Input sample for the CNN
 
@@ -437,7 +438,7 @@ def main():
 
     while True:
         try:
-            if napdetector == 1:
+            if napdetector == 1:                                        # Reset and reconfigure device after idle time
                 CLIport.write('resetDevice\n'.encode()) 
                 time.sleep(0.5)
                 sendConfig(configFileName)
@@ -471,4 +472,4 @@ def main():
                     break
 
 
-main()                          # Call for main loopF
+main()                          # Call for main loop
