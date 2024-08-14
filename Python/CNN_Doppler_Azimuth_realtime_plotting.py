@@ -15,14 +15,14 @@ from keras import models
 configFileName = os.getcwd() + '\\config_files\\config_file_doppler_azimuth_32x256_3D.cfg'
 
 # CNN 3d model, min and max values
-model_name_dop = os.getcwd() + '\\all_targets_doppler_1037_3598.h5'
-min_dop = 1045.0
-max_dop = 3598.0
+model_name_dop = os.getcwd() + '\\all_targets_doppler_1211_6603.h5'
+min_dop = 1211.0
+max_dop = 6603.0
 
 # CNN 2D model, min and max values
-model_name_az = os.getcwd() + '\\all_targets_azimuth_0_10922.h5'
+model_name_az = os.getcwd() + '\\all_targets_azimuth_0_37230.h5'
 min_az = 0
-max_az = 10922
+max_az = 37230
 
 THRESHOLD = 0.1                                # Threshold for non-idle probability
 
