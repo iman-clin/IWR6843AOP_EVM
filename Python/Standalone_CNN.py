@@ -29,7 +29,7 @@ DEBUG = False               # Debug constants for extra prints
 
 RANGE_FFT_SIZE = 256        # Num range bins
 DOPPLER_FFT_SIZE = 31       # Num azimuth bins - 1
-DEPTH = 4                   # Depth of a CNN sample
+DEPTH = 4                   # Depth of a 3D CNN sample
 
 # Initialization of Buffer and other useful vars
 CLIport = {}
@@ -48,6 +48,10 @@ compteur = 0
 workDir = os.getcwd() + '\\Standalone'
 configFileName = workDir + '\\..\\config_files\\config_file_doppler_azimuth_32x256_3D.cfg'
 dataset_path = workDir + "\\Dataset\\"
+
+# Section 1.1 : Functions definitions for data acquisition
+
+# Function for serial and device configuration
 
 def serialConfig(configFileName):
     global CLIport, Dataport
@@ -77,6 +81,8 @@ def serialConfig(configFileName):
         print(str(se) + '\n')
         sys.exit()
     return CLIport, Dataport
+
+# Function to parse data from the config file
 
 def parseConfigFile(configFileName):
     configParameters = {} # Initialize an empty dictionary to store the configuration parameters
@@ -136,7 +142,7 @@ def selectType(typeName):
         print('type location = ', typelocation)
     return(typelocation)
 
-#Function to read a full data Packet, from frame header to last data
+# Function to read a full data Packet, from frame header to last data
 
 def readData(Dataport):
     global byteBuffer, byteBufferLength
@@ -184,6 +190,8 @@ def readData(Dataport):
                 if (byteBufferLength >= totalPacketLen) and (byteBufferLength != 0):
                     break
     return byteBuffer
+
+# Function to parse Data from the sensor that will be used to build the training dataset
 
 def parseData68xx(byteBuffer):
     global compteur
@@ -238,10 +246,10 @@ def parseData68xx(byteBuffer):
             vect = byteBuffer[idX:idX + tlv_length].view(np.uint32)     # Data vector
             points_array = np.zeros([int(num_points),4],dtype='uint32')
             points_array = vect.reshape(int(num_points),4)
-            if DEBUG:
-                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
-                points_df = pd.DataFrame(points_array,columns=labels)
-                print(points_df)
+            #if DEBUG:                                                   # Uncomment if no TLV type 7
+            #    labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
+            #    points_df = pd.DataFrame(points_array,columns=labels)
+            #    print(points_df)
 
         # Read the data if TLV type 4 (Range Azimuth Heatmap) detected
         if tlv_type == 4:
@@ -260,7 +268,7 @@ def parseData68xx(byteBuffer):
                 if mat_az.shape == (RANGE_FFT_SIZE,DOPPLER_FFT_SIZE):
                     dataOK = 1
                     if DEBUG == True:
-                        print('Range Azimuth Heatmap data :',QQ,'\n')
+                        print('Range Azimuth Heatmap data :',mat_az,'\n')
                 else:
                     dataOK = 0
                     print('Invalid Range Azimuth Matrix')
@@ -305,19 +313,23 @@ def parseData68xx(byteBuffer):
             pointsinfo_array = np.zeros([int(num_points),2],dtype='uint16')
             pointsinfo_array = vect_pi.reshape(int(num_points),2)
             points_array = np.concatenate((points_array,pointsinfo_array), axis=1)
-            labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
-            points_df = pd.DataFrame(points_array,columns=labels)
             if DEBUG:
+                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
+                points_df = pd.DataFrame(points_array,columns=labels)
                 print("\n",points_df,"\n")
 
         idX += tlv_length   # Check next TLV
     return dataOK, mat_dop, mat_az
+
+# Function to recover the useful data of a frame
 
 def update():
     # Read and parse the received data
     PacketBuffer = readData(Dataport)               # Read a frame and store it in the packet Buffer
     dataOK, dop_hm, az_hm = parseData68xx(PacketBuffer)  # Parse Data in the packet Buffer, return range doppler heatmap data
     return dataOK, dop_hm, az_hm
+
+# Function to save the data in a csv file
 
 def saveM(matf,n,type,num):
     global classe
@@ -340,6 +352,8 @@ def saveM(matf,n,type,num):
         sys.exit()
 
 # **Section 1.2 : Dataset acquisition**
+
+# Function for acquisition and saving of num samples for a class dataset building
 
 def classAcquisition(class_name,num):
     global compteur, classe
@@ -386,7 +400,10 @@ def classAcquisition(class_name,num):
             Dataport.close()
             break
 
-n_class = 360 # number of samples for each class
+n_class = 360 # number of samples for each class, note: acquisition time = n_class*0.5 seconds
+
+
+# Dataset acquisition routine
 
 print("Serial connection, make sure the sensor is connected to PC")
 
@@ -419,12 +436,13 @@ type_list = [name for name in os.listdir(dataset_path) if isdir(join(dataset_pat
 
 i = 0
 
+# Gather the class list for each type of data, keep all that in a dictionnary
 for type in type_list:
     type_dict = {}
     type_dict["type input"] = type
     class_list = [name for name in os.listdir(join(dataset_path,type)) if isdir(join(dataset_path, type))]
     type_dict["classes"] = class_list
-    print (type_dict)
+    print(type_dict)
     type_list[i] = type_dict
     i += 1
 
@@ -433,6 +451,7 @@ num_samples=0
 for type in type_list:
         for target in type["classes"]:
                 num_samples += len(os.listdir(join(dataset_path, type["type input"], target)))
+
 # Settings
 perc_keep_samples = 1.0 # 1.0 is keep all samples
 val_ratio = 0.15
@@ -454,6 +473,7 @@ def natural_keys(text):
 filenames_dict = {}
 y_dict = {}
 
+# Create filenames dictionnary and the corresponding class dictionnary for each data type
 for type in type_list:
     files = []
     y = []
@@ -474,7 +494,6 @@ for type in type_list:
             dat = ""
             fc = 0
             for i, f in enumerate(files):
-                #print('i:',i,',f:',f)
                 if i == 0:
                     dat = f.split('_')[-7] + f.split('_')[-6] + f.split('_')[-5] + f.split('_')[-4] + f.split('_')[-3]
                     fln[fc].append(f)
@@ -494,7 +513,6 @@ for type in type_list:
 
             for x in i_f:
                 idx.append(np.argsort(np.array(x)))
-
 
             for w, z in enumerate(idx):
                 for i in range(0, len(z)-3):
@@ -604,8 +622,6 @@ def min_max_prep(in_files, in_z, type):
             
     return min, max
 
-global min_m
-global max_m
 min_az, max_az = min_max_prep(filenam_az, z_az, type_list[0])
 min_dop, max_dop = min_max_prep(filenam_dop, z_dop, type_list[1])
 
@@ -627,12 +643,13 @@ y_orig_val_dop = y_doppler[:val_set_size_dop]
 y_orig_test_dop = y_doppler[val_set_size_dop:(val_set_size_dop + test_set_size_dop)]
 y_orig_train_dop = y_doppler[(val_set_size_dop + test_set_size_dop):]
 
-#print(type_list)
 dop_hm = readCSV(join(dataset_path, 'Doppler',type_list[1]['classes'][int(y_orig_train_dop[0])],filenames_train_dop[0][0]))
 NUMBER_ROWS_DOP, NUMBER_COLUMNS_DOP = dop_hm.shape
 
 az_hm = readCSV(join(dataset_path, 'Azimuth',type_list[0]['classes'][int(y_orig_train_az[0])],filenames_train_az[0]))
 NUMBER_ROWS_AZ, NUMBER_COLUMNS_AZ = az_hm.shape
+
+# Function to create dataset object from filenames and true output
 
 def build_dataset(in_files, in_y, type):
     if (type['type input']=='Doppler'):
@@ -661,9 +678,7 @@ def build_dataset(in_files, in_y, type):
             if not path.endswith('.csv'):
                 continue
             
-            #print(path)
             heatmap = readCSV(path)
-            #print(heatmap.shape)
             aux_n1 = np.subtract(heatmap, min_dop)
             aux_n2 = np.divide(aux_n1, (max_dop - min_dop))
 
@@ -690,8 +705,6 @@ def build_dataset(in_files, in_y, type):
             aux_n2 = np.divide(aux_n1, (max_dop - min_dop))
 
             out_x[index*(NUMBER_ROWS_DOP):index*(NUMBER_ROWS_DOP)+NUMBER_ROWS_DOP, : , 3] = aux_n2
-            
-            #print(out_x[index].shape)
         
     else:
         # Numpy arrays to store train, test and val matrix
@@ -714,10 +727,6 @@ def build_dataset(in_files, in_y, type):
                 continue
             
             heatmap = readCSV(path)
-            
-            # Data normalization
-            #aux_n1 = np.subtract(heatmap, min_az)
-            #aux_n2 = np.divide(aux_n1, (max_az - min_az))
 
             out_x[index*(NUMBER_ROWS_AZ):index*(NUMBER_ROWS_AZ)+NUMBER_ROWS_AZ, :] = heatmap
             
@@ -1239,7 +1248,7 @@ def update_window():
 import tkinter as tk
 from PIL import ImageTk, Image
 
-THRESHOLD = 0.8
+THRESHOLD = 0.8         # Threshold value for non-idle probabilities
 init = 0
 
 # Initialize the display window
