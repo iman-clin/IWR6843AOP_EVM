@@ -229,27 +229,27 @@ def parseData68xx_AOP(byteBuffer):
             num_points = tlv_length/16
             if DEBUG:
                 print(num_points,"points detected")
-            vect = byteBuffer[idX:idX + tlv_length].view(np.uint32)     # Data vector
-            points_array = np.zeros([int(num_points),4],dtype='uint32')
+            vect = byteBuffer[idX:idX + tlv_length].view(np.float32)        # Data vector
+            points_array = np.zeros([int(num_points),4],dtype=np.float32)
             points_array = vect.reshape(int(num_points),4)
-            #if DEBUG:                                                  # Uncomment if there are no tlv type 7
+            #if DEBUG:                                                      # Uncomment if there are no tlv type 7
                 #labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
                 #points_df = pd.DataFrame(points_array,columns=labels)
                 #print(points_df)
 
         # Read the data if TLV type 4 (Range Azimuth Heatmap) detected
         if tlv_type == 4:
-            expected_size = RANGE_FFT_SIZE * numTxAnt * numRxAnt * np.dtype(np.int16).itemsize * 2    # Expected TLV size : numRangebins * numVirtualAntennas * 2 bytes * 2 (Real + Imag values)
+            expected_size = RANGE_FFT_SIZE * numTxAnt * numRxAnt * np.dtype(np.int16).itemsize * 2    # Expected TLV size : numRangebins * numAzimuthVirtualAntennas * 2 bytes * 2 (Real + Imag values)
             if tlv_length == expected_size:
                 if DEBUG:
                     print("Sizes Matches: ", expected_size)
                 vect_rahm = byteBuffer[idX:idX + tlv_length].view(np.int16)     # Data vector of the tlv value
                 cmat_ra = np.array([[vect_rahm[i] + 1j * vect_rahm[i+1] for i in range(0, len(vect_rahm), 2)]])  # Reassembling real and imag values in one complex matrix
                 cmat_ra = np.reshape(cmat_ra,(RANGE_FFT_SIZE,numTxAnt*numRxAnt))
-                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE+1,axis=1)
-                Q = abs(Q)                                                     # Magnitude of the fft
-                Q = np.fft.fftshift(Q,axes=(1,))                               # Cut off first angle bin
-                QQ = Q[:,1:]                             
+                Q = np.fft.fft(cmat_ra,n=DOPPLER_FFT_SIZE+1,axis=1)             # FFT along virtual antennas axis
+                Q = abs(Q)                                                      # Magnitude of the fft
+                Q = np.fft.fftshift(Q,axes=(1,))                                # Shift the data to correct position
+                QQ = Q[:,1:]                                                    # Cut off first angle bin
                 if QQ.shape == (RANGE_FFT_SIZE,DOPPLER_FFT_SIZE):
                     dataOK = 1
                     print('Range Azimuth Heatmap data :\n',QQ,'\n')
@@ -273,7 +273,7 @@ def parseData68xx_AOP(byteBuffer):
                 ares = byteBuffer[idX:idX + resultSize].view(np.uint16) # Data vector
                 res = np.reshape(ares, res.shape)                       # Data array of the right size
                 # Shift the data to the correct position
-                rest = np.fft.fftshift(res, axes=(1,))      # put left to center, put center to right
+                rest = np.fft.fftshift(res, axes=(1,))                  # put left to center, put center to right
                 # Transpose the input data for better visualization
                 result = np.transpose(rest)
                 # Remove DC value from matrix
@@ -296,11 +296,11 @@ def parseData68xx_AOP(byteBuffer):
             num_points = tlv_length/4
             if DEBUG:
                 print(num_points,"points detected")
-            vect_pi = byteBuffer[idX:idX + tlv_length].view(np.uint16)     # Data vector
-            pointsinfo_array = np.zeros([int(num_points),2],dtype='uint16')
+            vect_pi = byteBuffer[idX:idX + tlv_length].view(np.uint16)*0.1
+            pointsinfo_array = np.zeros([int(num_points),2],dtype=np.uint16)
             pointsinfo_array = vect_pi.reshape(int(num_points),2)
             points_array = np.concatenate((points_array,pointsinfo_array), axis=1)
-            if DEBUG:
+            if DEBUG:                                                                   # Print points positions, speed and SNR if debug 
                 labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
                 points_df = pd.DataFrame(points_array,columns=labels)
                 print("\n",points_df,"\n")
@@ -316,7 +316,6 @@ def update():
     # Read and parse the received data
     PacketBuffer = readData(Dataport)           # Read a frame and store it in the packet Buffer
     PacketBufferLength = len(PacketBuffer)
-    #ObjectsData = parser_one_mmw_demo_output_packet(PacketBuffer,PacketBufferLength,DEBUG)   # Parse statistics on objects detected, add later to gather more informatons
     dataOK, matu, mat_ra_hm = parseData68xx_AOP(PacketBuffer) # Parse Range-Doppler Heatmap
     return dataOK, matu, mat_ra_hm
 
@@ -403,10 +402,15 @@ def main():
 
 main()  # call for main sampling loop
 
+
+# Calibration Block
 """                 if classe == 'idle':
                     saveM(matf,DOPPLER_FFT_SIZE,"Doppler")                  # Calibration only, else save both type whatever happens
                     saveM(mat_ra_hmf,RANGE_FFT_SIZE,"Azimuth")
-                if classe == 'presence':
+                elif classe == 'presence':
                     saveM(matf,DOPPLER_FFT_SIZE,"Doppler")
+                elif classe == 'object_moved':
+                    saveM(mat_ra_hmf,RANGE_FFT_SIZE,"Azimuth")
                 else:
+                    saveM(matf,DOPPLER_FFT_SIZE,"Doppler")
                     saveM(mat_ra_hmf,RANGE_FFT_SIZE,"Azimuth")      """    
