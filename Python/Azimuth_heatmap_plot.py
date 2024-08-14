@@ -1,10 +1,8 @@
 # Import necessary libraries for heatmap plotting
 import numpy as np
-import pandas as pd 
 import os
 from os.path import join
 import matplotlib.pyplot as plt
-import matplotlib.patches as pat
 import glob
 import scipy.interpolate as spi
 
