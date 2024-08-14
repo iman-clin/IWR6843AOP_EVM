@@ -21,7 +21,7 @@ model_name_az = os.getcwd() + '\\all_targets_azimuth_0_10922.h5'
 min_az = 0
 max_az = 10922
 
-THRESHOLD = 0.5                                # Threshold for non-idle probability
+THRESHOLD = 0.5                                # Threshold for idle probabilities
 
 # Number of rows and columns for heatmap samples
 DOPPLER_FFT_SIZE = 31
@@ -82,7 +82,7 @@ def serialConfig(configFileName):
 
 def parseConfigFile(configFileName):
     global RANGE_FFT_SIZE, DOPPLER_FFT_SIZE
-    configParameters = {} # Initialize an empty dictionary to store the configuration parameters
+    configParameters = {}           # Initialize an empty dictionary to store the configuration parameters
 
     # Read the configuration file to extract config parameters and frame config
     config = [line.rstrip('\r\n') for line in open(configFileName)]
@@ -133,7 +133,7 @@ def parseConfigFile(configFileName):
 
 # ------------------------------------------------------------------
 
-# Function to normalize a matrix
+# Function to normalize heatmap matrix depending on it's type
 
 def norm(mat,type):
     if type == 'Doppler':
@@ -154,7 +154,7 @@ def norm(mat,type):
 
 # ------------------------------------------------------------------
 
-#Function to read a full data Packet, from frame header to last data
+# Function to read a full data Packet, from frame header to last data
 
 def readData(Dataport):
     global byteBuffer, byteBufferLength
@@ -254,10 +254,10 @@ def parseData68xx(byteBuffer):
             vect = byteBuffer[idX:idX + tlv_length].view(np.uint32)     # Data vector
             points_array = np.zeros([int(num_points),4],dtype='uint32')
             points_array = vect.reshape(int(num_points),4)
-            if DEBUG:
-                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
-                points_df = pd.DataFrame(points_array,columns=labels)
-                print(points_df)
+            #if DEBUG:                                                  # Uncomment if no TLV type 7
+            #    labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]']
+            #    points_df = pd.DataFrame(points_array,columns=labels)
+            #    print(points_df)
 
         # Read the data if TLV type 4 (Range Azimuth Heatmap) detected
         if tlv_type == 4:
@@ -308,12 +308,12 @@ def parseData68xx(byteBuffer):
                 ares = byteBuffer[idX:idX + resultSize].view(np.uint16) # Data vector
                 res = np.reshape(ares, res.shape)                       # Data array of the right size
                 # Shift the data to the correct position
-                rest = np.fft.fftshift(res, axes=(1,))      # put left to center, put center to right
+                rest = np.fft.fftshift(res, axes=(1,))                  # Put left to center, put center to right
                 # Transpose the input data for better visualization
                 result = np.transpose(rest)
                 # Normalize the data
                 mat = norm(result[1:],'Doppler')
-                if mat.shape == (DOPPLER_FFT_SIZE, RANGE_FFT_SIZE):
+                if mat.shape == (DOPPLER_FFT_SIZE, RANGE_FFT_SIZE):     # Assemble the captured heatmap with the 3 previous one to verify 3D CNN input dimensions
                     if init < 4:
                         inpt_dop[:, : , : , init, 0] = mat
                         init += 1
@@ -324,12 +324,8 @@ def parseData68xx(byteBuffer):
                         inpt_dop[:, : , : , 1, 0] = inpt_dop[:, : , : , 2, 0]
                         inpt_dop[:, : , : , 2, 0] = inpt_dop[:, : , : , 3, 0]
                         inpt_dop[:, : , : , 3, 0] = mat
-
-                # Remove DC value from matrix
-                mat = result[1:, :]
-                if mat.shape == (DOPPLER_FFT_SIZE, RANGE_FFT_SIZE):
                     dataOK = 1
-                    if DEBUG == True:
+                    if DEBUG == True:                                   # DataOk and print matrix if debug
                         print('Range Doppler heatmap data:\n',mat,'\n')
                 else:
                     dataOK = 0
@@ -346,9 +342,10 @@ def parseData68xx(byteBuffer):
             pointsinfo_array = np.zeros([int(num_points),2],dtype='uint16')
             pointsinfo_array = vect_pi.reshape(int(num_points),2)
             points_array = np.concatenate((points_array,pointsinfo_array), axis=1)
-            labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
-            points_df = pd.DataFrame(points_array,columns=labels)
-            print(points_df,'\n')
+            if DEBUG:
+                labels = ['X[m]','Y[m]','Z[m]','Doppler[m/s]','SNR[dB]','noise[dB]']
+                points_df = pd.DataFrame(points_array,columns=labels)
+                print(points_df,'\n')
 
         idX += tlv_length   # Check next TLV
     return dataOK           # Later return points_array too, find a way to add the infos to CNN data
@@ -372,19 +369,19 @@ def update():
     PacketBuffer = readData(Dataport)
     dataOk = parseData68xx(PacketBuffer)
     if dataOk > 0:
-        # Calculate the probability of classes for 3D CNN
+        # Calculate the probability of classes for 3D CNN input
         rt_dop = model_dop.predict(inpt_dop, verbose=0)
         print("Class probabilities for moving features:",rt_dop)
         pred_dop.append(float(rt_dop[0][0]))
-        # Calculate the probability of classes for 2D CNN
+        # Calculate the probability of classes for 2D CNN input
         rt_az = model_az.predict(inpt_az, verbose=0)
         print("Class probabilities for static features:",rt_az)
         pred_az.append(float(rt_az[0][0]))
-
         print("Idle probabilities:\n",'Doppler:',pred_dop,'\n Azimuth:',pred_az)
-        if pred_az[0] > 1-THRESHOLD and pred_dop[0] > 1-THRESHOLD:
+
+        if pred_az[0] > THRESHOLD and pred_dop[0] > THRESHOLD:  # Check if idle prediction is trustworthy by comparing to threshold
             clas = label[0]
-        elif pred_dop[0] < 1-THRESHOLD:
+        elif pred_dop[0] < THRESHOLD:                           # Priority on presence detection
             clas = label[1]
         else:
             clas = label[2]
