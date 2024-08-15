@@ -3,6 +3,28 @@
 Git repo about IWR6843_AOP_EVM application for people detection by CNN
 Contains a parsing code to acquire data from serial connection, a keras' CNN training model and a heatmap plotter for the acquired datas
 
+## How to use
+
+The first step in the use of this program will always be the dataset acquisition, either by using `DataGet_allTLVs.py`, `2sensors_dataset.py` if there are two sensors being used in the same time or the standalone code. In the two last cases the building of the dataset will follow the acquisition, but if the calibration has already been processed you can still type skip when asked to only build the dataset.\
+\
+In the first case you will then need to build the npz archives containing the training dataset already prepared by launching `preparing_dataset_doppler_azimuth.ipnyb`\
+Note that the repository structure of the dataset should be already prepared as following in order for the program to find the correct paths :\
+\
+Dataset\
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Azimuth\
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;idle\
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;object_moved\
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Doppler\
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;idle\
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;presence\
+\
+Once you got the `.npz` archives ready to be used, you will then want to build and train the CNNs. In order to do so, you will either launch `Doppler_Azimuth_multiclass_training_local.ipnyb` or `2sensors_CNN_training_local` if you want to train it locally on your computer; Or the google colab version of those codes if you want a quicker training (link available at the end of the code description section).\
+If the training is efficient, those programs will generate the `.h5` files containing the pre-trained CNNs that will be loaded for the class prediction programs.\
+\
+Finally what you want is to launch a class prediction test to check if the CNNs are working as intended. To do so you will either pick the main version of `CNN_Doppler_Azimuth_realtime.py`, the plotting version if you want to check that the data suits your expectations or the lowpower version for a less power consuming version of it with random time between sample acquisitions.\
+\
+It's important to notice that for the lowpower version to be efficient, you will first need to flash the sensor with the custom binary file featuring in the binary repository of this git. You can load it by going on uniflash online platform from texas instrument ressources.
+
 ## Code Description
 
 ### Python Files
