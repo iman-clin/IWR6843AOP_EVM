@@ -85,7 +85,7 @@ Diverse versions of the multiclass training are available in order to generate t
 
 Assembles all the previous files in a single one. Used to make calibration, dataset preparation, CNN training and real time class prediction more easy to use in a single workflow. This code should is still incomplete and features are yet to be added.
 
-[Google colab notebook for online training](https://drive.google.com/file/d/1OV4RE8pCYmDNoZVx6Gf-anxS9c_T9hl8/view?usp=sharing)
+[Google colab notebook for online training](https://drive.google.com/drive/folders/1J7tcfpMoFhsTTIxqmqu2MpY4z9As6OnT?usp=sharing)
 
 ## Required Python packages
 
