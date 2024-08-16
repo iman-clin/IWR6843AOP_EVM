@@ -54,14 +54,19 @@ Recover the data contained in `.csv` files of a user-specified class, processes 
 - **CNN_Doppler_Azimuth_realtime :**\
  Same purpose but meant to be used with a pre-trained 3D CNN for class prediction on moving features (Doppler: presence or non-presence detection). And a pre-trained 2D CNN for class prediction on static features (Azimuth: Object moved or room in idle configuration). This code should be used with a Doppler 3D CNN and an Azimuth 2D CNN and config file Doppler_Azimuth
 
-- **CNN_Cat_realtime :**\
- Same purpose as Doppler Azimuth realtime but meant to be used with a pre-trained 2D CNN using as feature the concatenation of Doppler and Azimuth heatmaps. Not reliable for now even though the CNN training goes well.
-
 - **CNN_Doppler_Azimuth_realtime_lowpower :**\
  Same purpose as Doppler Azimuth realtime but use a low power configuration of the sensor. If the detected class corresponds to no presence and a room untouched, the sensor is put in sleep mode for a random amount of time between 1 and 5 seconds. This should lower the power consumption and max the sensor lifespan in order to achieve class detection on a long period of time. This code needs a sensor flashed with the custom firmware avalaible in the binaries dir of this repository in order to work properly (modifies the idlePowerCycle and adds the resetDevice CLI commands)
 
 - **CNN_Doppler_Azimuth_realtime_plotting :**\
  Add the display of both heatmaps in separated window as well as the class prediction, could be used for a user supervised class prediction.
+
+***Standalone CNN :***
+
+This code will execute all previous functions of serial connection, calibration, CNN training and class prediction in one single program. It is designed for a functional presentation in a new environment in the least time possible.
+
+***2sensors dataset and CNN :***
+
+Those codes will serve the same aim as previous ones (calibration, training and realtime class prediction) but for two sensors connected at once. It will proceed to add up the Doppler and Azimuth heatmaps of both sensor and then train on the superposition of those for class detection.
 
 ---
 
@@ -79,7 +84,7 @@ Diverse versions of the preparing dataset code are available in order to make th
 
 Build a CNN model and train it based on the keras/tensorflow models. It will use the the dataset prepared as a `.npz` file to train, test and validate the model. Also plot the accuracy and loss of the model and test the prediction on a testing dataset.
 
-Diverse versions of the multiclass training are available in order to generate the correct pre-trained CNN for the different applications (Doppler only, Doppler/Azimuth, Concatenated features...).
+Diverse versions of the multiclass training are available in order to generate the correct pre-trained CNN for the different applications (Doppler only, Doppler/Azimuth, 2 sensors at once...).
 
 **Standalone CNNs :**
 
