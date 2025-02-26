@@ -4,9 +4,10 @@ import pandas as pd
 import os
 from os.path import join
 import matplotlib.pyplot as plt
+import matplotlib.animation as anim
 import glob
 
-DEBUG = False
+DEBUG = True
 
 # Readcsv function that returns the data 
 def readCSV(filename):
@@ -42,44 +43,39 @@ def min_max(in_files):
             
     return min, max
 
-##################### Loop for heatmap printing #####################
+##################### Heatmap printing #####################
 
-classname = input("Please Input Class Name \n:>")
-#dataset_path = os.getcwd() + "/Dataset/"   #dataset path for raspberry
-dataset_path = os.getcwd() + "\\Dataset\\" + "Doppler\\" + classname            #dataset path for windows
-if DEBUG:
-    print('dataset path = ',dataset_path)
+classname = input("Please Input Class Name \n:>")    
+dataset_path = os.getcwd() + "/MTZ_experiment/dataset/" + classname            #dataset path for windows
 
 filenames = os.listdir(dataset_path)
+
+# use glob to get all the csv files in the folder
+csv_files = sorted(glob.glob(os.path.join(dataset_path, '*.csv')))
+
 if DEBUG:
+    print('dataset path = ',dataset_path)
     print('filenames = ',filenames)
+    print('csv_files : ',csv_files)
 
 global min_m
 global max_m
 min_m, max_m = min_max(filenames)
 
-# use glob to get all the csv files in the folder
-csv_files = sorted(glob.glob(os.path.join(dataset_path, '*.csv')))
-if DEBUG:
-    print('csv_files : ',csv_files)
+# Plot construction and update
+fig, axes = plt.subplots()
 
- 
-# loop over the list of csv files
-count = 0
-plt.ion()
-figure = plt.figure()
-axes = figure.add_subplot()
-for f in (csv_files):
-    # read the csv file
+def update(count):
+    f = csv_files[count]                    # Load and read csv file
     heatmap = readCSV(f)
-    aux_n1 = np.subtract(heatmap, min_m)
+    aux_n1 = np.subtract(heatmap, min_m)    # Data formatting
     df = np.divide(aux_n1, max_m - min_m)
     df[0,0] = 0
     df[0,1] = 1
     axes.imshow(heatmap, cmap='Spectral_r', interpolation='nearest', aspect='auto')
-    plt.title(csv_files[count]+'_new')
-    plt.pause(0.25)
-    #energia_calculada = np.sum(np.power(df, 2))     # Calculate energy deployed on each frame
-    #print(energia_calculada)  
-    count+=1
-plt.ioff()
+    plt.title(filenames[count])
+    return 0
+
+
+ani = anim.FuncAnimation(fig = fig, func = update, frames = len(csv_files), interval = 250)
+plt.show()
