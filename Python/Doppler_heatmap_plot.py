@@ -72,6 +72,7 @@ def update(count):
     df = np.divide(aux_n1, max_m - min_m)
     df[0,0] = 0
     df[0,1] = 1
+    axes.clear()
     axes.imshow(heatmap, cmap='Spectral_r', interpolation='nearest', aspect='auto')
     plt.title(filenames[count])
     return 0
